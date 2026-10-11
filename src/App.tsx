@@ -5,6 +5,7 @@ import { Footer } from './components/layout/Footer';
 import { HomePage } from './pages/HomePage';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { CommunityReviewsPage } from './pages/CommunityReviewsPage';
+import { CommunitiesPage } from './pages/CommunitiesPage';
 import { RequestHubModal } from './components/directory/RequestHubModal';
 import { ReviewsModal } from './components/reviews/ReviewsModal';
 import { JoinHubModal } from './components/chat/JoinHubModal';
@@ -142,7 +143,16 @@ export function AppContent() {
           />
           <Route
             path="/communities"
-            element={<Navigate to="/reviews" replace />}
+            element={
+              <CommunitiesPage
+                bookmarkedIds={bookmarkedIds}
+                onToggleBookmark={handleToggleBookmark}
+                onJoinHub={(s) => setSelectedJoinShow(s)}
+                onViewReviews={(s) => setSelectedReviewShow(s)}
+                onRequestHub={() => setIsRequestModalOpen(true)}
+                setNotificationToast={setNotificationToast}
+              />
+            }
           />
           <Route
             path="/community-reviews"

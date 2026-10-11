@@ -2,8 +2,8 @@ import { useState, useMemo } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 
 interface NavbarProps {
-  activeTab?: 'home' | 'discover' | 'reviews' | 'communities' | 'community-reviews';
-  onTabChange?: (tab: 'home' | 'discover' | 'reviews' | 'communities' | 'community-reviews') => void;
+  activeTab?: 'home' | 'discover' | 'reviews' | 'communities';
+  onTabChange?: (tab: 'home' | 'discover' | 'reviews' | 'communities') => void;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   onOpenNotifications?: () => void;
@@ -22,16 +22,11 @@ export const Navbar = ({
   const [notifCount, setNotifCount] = useState(3);
   const location = useLocation();
 
-  const currentTab = useMemo(() => {
+  const currentTab = useMemo<'home' | 'discover' | 'reviews' | 'communities'>(() => {
     const p = location.pathname;
     if (p.startsWith('/discover')) return 'discover';
-    if (
-      p.startsWith('/reviews') ||
-      p.startsWith('/communities') ||
-      p.startsWith('/community-reviews')
-    ) {
-      return 'community-reviews';
-    }
+    if (p.startsWith('/communities')) return 'communities';
+    if (p.startsWith('/reviews') || p.startsWith('/community-reviews')) return 'reviews';
     return 'home';
   }, [location.pathname]);
 
@@ -74,14 +69,25 @@ export const Navbar = ({
             </Link>
             <Link
               to="/reviews"
-              onClick={() => onTabChange?.('community-reviews')}
+              onClick={() => onTabChange?.('reviews')}
               className={`px-4 py-2 font-label-lg text-sm rounded-xl transition-all cursor-pointer ${
-                currentTab === 'community-reviews'
+                currentTab === 'reviews'
                   ? 'bg-[#e50914] text-white font-bold shadow-[0_0_12px_rgba(229,9,20,0.45)]'
                   : 'text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#201f1f]'
               }`}
             >
-              Community &amp; Reviews
+              Reviews
+            </Link>
+            <Link
+              to="/communities"
+              onClick={() => onTabChange?.('communities')}
+              className={`px-4 py-2 font-label-lg text-sm rounded-xl transition-all cursor-pointer ${
+                currentTab === 'communities'
+                  ? 'bg-[#e50914] text-white font-bold shadow-[0_0_12px_rgba(229,9,20,0.45)]'
+                  : 'text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#201f1f]'
+              }`}
+            >
+              Communities
             </Link>
           </nav>
         </div>
@@ -206,10 +212,10 @@ export const Navbar = ({
       </div>
 
       {/* Mobile Subnavigation Row */}
-      <div className="flex lg:hidden items-center justify-around w-full px-4 py-2 bg-[#131313] border-t border-[#353534]/50">
+      <div className="flex lg:hidden items-center justify-around w-full px-3 py-2 bg-[#131313] border-t border-[#353534]/50">
         <Link
           to="/"
-          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
             currentTab === 'home'
               ? 'bg-[#e50914] text-white shadow'
               : 'text-[#e9bcb6] hover:text-white'
@@ -219,7 +225,7 @@ export const Navbar = ({
         </Link>
         <Link
           to="/discover"
-          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
             currentTab === 'discover'
               ? 'bg-[#e50914] text-white shadow'
               : 'text-[#e9bcb6] hover:text-white'
@@ -229,13 +235,23 @@ export const Navbar = ({
         </Link>
         <Link
           to="/reviews"
-          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-            currentTab === 'community-reviews'
+          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+            currentTab === 'reviews'
               ? 'bg-[#e50914] text-white shadow'
               : 'text-[#e9bcb6] hover:text-white'
           }`}
         >
-          Community &amp; Reviews
+          Reviews
+        </Link>
+        <Link
+          to="/communities"
+          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+            currentTab === 'communities'
+              ? 'bg-[#e50914] text-white shadow'
+              : 'text-[#e9bcb6] hover:text-white'
+          }`}
+        >
+          Communities
         </Link>
       </div>
     </header>

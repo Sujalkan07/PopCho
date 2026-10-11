@@ -163,11 +163,10 @@ export const DirectoryControls: React.FC<DirectoryControlsProps> = ({
               onChange={(e) => onSortChange(e.target.value)}
               className="appearance-none bg-[#0e0e0e] text-[#e5e2e1] text-xs font-semibold py-1.5 pl-3 pr-8 rounded-xl border border-[#353534] focus:outline-none focus:border-[#e50914] cursor-pointer"
             >
-              <option value="active">Most Active Communities</option>
+              <option value="active">Most Popular &amp; Active</option>
               <option value="rating">Highest Rated (All-Time)</option>
-              <option value="recent">Recently Added Hubs</option>
+              <option value="recent">Newest Releases</option>
               <option value="trending">Trending This Week</option>
-              <option value="spoilers">Most Spoilers Discussed</option>
             </select>
             <span className="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-[#e9bcb6]/70 pointer-events-none text-base">
               expand_more
