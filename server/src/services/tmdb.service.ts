@@ -5,7 +5,10 @@ import type {
   RawTmdbSeason,
   NormalizedMediaItem,
   RawTmdbCastMember,
-  RawTmdbCrewMember
+  RawTmdbCrewMember,
+  RawTmdbReviewResponse,
+  NormalizedTmdbReview,
+  ReviewsResponse
 } from '../types/tmdb.types.js';
 
 // Simple in-memory cache with TTL (10 minutes default)
@@ -148,7 +151,9 @@ export function normalizeMediaItem(
       ? raw.media_type
       : mediaTypeFallback;
 
-  const title = raw.name || raw.title || 'Untitled';
+  const title = mediaType === 'movie'
+    ? (raw.title || raw.name || 'Untitled')
+    : (raw.name || raw.title || 'Untitled');
   const idStr = String(raw.id);
   const voteAvg = typeof raw.vote_average === 'number' && raw.vote_average > 0 ? Math.round(raw.vote_average * 10) / 10 : 0;
   const voteCount = raw.vote_count || 0;
@@ -162,13 +167,7 @@ export function normalizeMediaItem(
     genres = [mediaType === 'movie' ? 'Cinema' : 'Drama'];
   }
 
-  // Consistent community figures derived from TMDB popularity & vote counts
-  const popFactor = Math.floor((raw.popularity || 40) * 12);
-  const communityMembersCount = Math.min(185000, Math.max(3400, voteCount * 4 + popFactor));
-  const activeOnlineCount = Math.max(120, Math.floor(communityMembersCount * 0.08) + 85);
-  const channelsCount = 12 + (raw.id % 28);
-
-  // Dynamic hub badges based on rating and popularity
+  // Dynamic hub badges based on genuine rating and popularity
   let hubBadge: string | undefined;
   let hubBadgeType: 'primary' | 'secondary' | 'neutral' | undefined;
 
@@ -202,11 +201,8 @@ export function normalizeMediaItem(
     voteCount,
     genres: genres.slice(0, 3),
     communityId: idStr,
-    communityMembersCount,
-    activeOnlineCount,
     hubBadge,
     hubBadgeType,
-    channelsCount,
     statusText: mediaType === 'tv' ? 'Active Series' : 'Feature Film'
   };
 }
@@ -306,12 +302,15 @@ export class TmdbService {
     id: string | number,
     mediaType: 'movie' | 'tv' = 'tv'
   ): Promise<NormalizedMediaItem & { rawDetails: RawTmdbDetails }> {
+    const cleanId = String(id).replace(/^(tv-|movie-)/, '');
     const raw = await fetchTmdb<RawTmdbDetails>(
-      `/${mediaType}/${id}`,
+      `/${mediaType}/${cleanId}`,
       { append_to_response: 'credits,similar,recommendations' }
     );
 
-    const title = raw.name || raw.title || 'Untitled';
+    const title = mediaType === 'movie'
+      ? (raw.title || raw.name || 'Untitled')
+      : (raw.name || raw.title || 'Untitled');
     const voteAvg = typeof raw.vote_average === 'number' && raw.vote_average > 0 ? Math.round(raw.vote_average * 10) / 10 : 0;
     const voteCount = raw.vote_count || 0;
     const genres = raw.genres ? raw.genres.map((g) => g.name) : ['Drama'];
@@ -339,12 +338,9 @@ export class TmdbService {
       tagline: raw.tagline,
       network,
       communityId: String(raw.id),
-      communityMembersCount: Math.min(220000, Math.max(4500, voteCount * 5 + 4000)),
-      activeOnlineCount: Math.max(200, Math.floor(voteCount * 0.4) + 300),
       hubBadge: raw.status === 'Ended' ? 'COMPLETED' : 'ACTIVE COMMUNITY',
       hubBadgeType: 'primary',
-      channelsCount: 16 + (raw.id % 20),
-      statusText: raw.status || 'Active Hub'
+      statusText: raw.status || (mediaType === 'tv' ? 'Active Series' : 'Feature Film')
     };
 
     return {
@@ -363,11 +359,12 @@ export class TmdbService {
     cast: { id: number; name: string; character: string; profilePath: string }[];
     crew: { id: number; name: string; job: string; department: string }[];
   }> {
+    const cleanId = String(id).replace(/^(tv-|movie-)/, '');
     const raw = await fetchTmdb<{
       id: number;
       cast: RawTmdbCastMember[];
       crew: RawTmdbCrewMember[];
-    }>(`/${mediaType}/${id}/credits`);
+    }>(`/${mediaType}/${cleanId}/credits`);
 
     const cast = (raw.cast || []).slice(0, 20).map((c) => ({
       id: c.id,
@@ -408,7 +405,8 @@ export class TmdbService {
       runtime?: number;
     }[];
   }> {
-    const raw = await fetchTmdb<RawTmdbSeason>(`/tv/${tvId}/season/${seasonNumber}`);
+    const cleanId = String(tvId).replace(/^(tv-|movie-)/, '');
+    const raw = await fetchTmdb<RawTmdbSeason>(`/tv/${cleanId}/season/${seasonNumber}`);
 
     return {
       id: raw.id,
@@ -435,13 +433,62 @@ export class TmdbService {
     id: string | number,
     mediaType: 'movie' | 'tv' = 'tv'
   ): Promise<NormalizedMediaItem[]> {
+    const cleanId = String(id).replace(/^(tv-|movie-)/, '');
     const raw = await fetchTmdb<{ results: RawTmdbMedia[] }>(
-      `/${mediaType}/${id}/similar`
+      `/${mediaType}/${cleanId}/similar`
     );
 
     return (raw.results || []).slice(0, 12).map((item) =>
       normalizeMediaItem(item, mediaType)
     );
+  }
+
+  /**
+   * 8. Official TMDB Reviews for movie or TV show
+   */
+  async getReviews(
+    id: string | number,
+    mediaType: 'movie' | 'tv' = 'tv',
+    page: number = 1
+  ): Promise<ReviewsResponse> {
+    const cleanId = String(id).replace(/^(tv-|movie-)/, '');
+    const rawData = await fetchTmdb<RawTmdbReviewResponse>(
+      `/${mediaType}/${cleanId}/reviews`,
+      { page }
+    );
+
+    const results: NormalizedTmdbReview[] = (rawData.results || []).map((rev) => {
+      let avatarUrl: string | undefined = undefined;
+      const rawAvatar = rev.author_details?.avatar_path;
+      if (rawAvatar) {
+        if (rawAvatar.startsWith('http://') || rawAvatar.startsWith('https://')) {
+          avatarUrl = rawAvatar;
+        } else if (rawAvatar.startsWith('/http://') || rawAvatar.startsWith('/https://')) {
+          avatarUrl = rawAvatar.slice(1);
+        } else {
+          avatarUrl = getTmdbImageUrl(rawAvatar, 'w300');
+        }
+      }
+
+      return {
+        id: rev.id,
+        author: rev.author || rev.author_details?.username || 'Anonymous Reviewer',
+        username: rev.author_details?.username,
+        avatarUrl,
+        rating: typeof rev.author_details?.rating === 'number' ? rev.author_details.rating : null,
+        content: rev.content || '',
+        createdAt: rev.created_at,
+        url: rev.url
+      };
+    });
+
+    return {
+      id,
+      page: rawData.page || 1,
+      results,
+      totalPages: rawData.total_pages || 1,
+      totalResults: rawData.total_results || results.length
+    };
   }
 }
 

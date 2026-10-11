@@ -24,11 +24,11 @@ export const ShowCard: React.FC<ShowCardProps> = ({
   const onlineFormatted =
     show.activeOnlineCount && show.activeOnlineCount >= 1000
       ? `${(show.activeOnlineCount / 1000).toFixed(1)}k`
-      : `${show.activeOnlineCount || 120}`;
+      : `${show.activeOnlineCount || 0}`;
   const membersFormatted =
     show.communityMembersCount && show.communityMembersCount >= 1000
       ? `${(show.communityMembersCount / 1000).toFixed(1)}k`
-      : `${show.communityMembersCount || 4500}`;
+      : `${show.communityMembersCount || 0}`;
 
   const isRedBadge = show.hubBadgeType === 'secondary' || show.hubBadgeType === 'primary';
 
@@ -90,19 +90,23 @@ export const ShowCard: React.FC<ShowCardProps> = ({
             </p>
 
             <div className="flex flex-wrap items-center gap-3 text-xs text-[#e9bcb6]/70">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse" />
-                <strong className="text-[#e5e2e1] font-semibold">{onlineFormatted} live</strong>
-                <span>• {membersFormatted} members</span>
-              </span>
-              <span>•</span>
-              <span>{show.channelsCount || 36} Active Channels</span>
-              {show.statusText && (
-                <>
-                  <span>•</span>
-                  <span>{show.statusText}</span>
-                </>
+              {show.communityMembersCount ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse" />
+                  <strong className="text-[#e5e2e1] font-semibold">{onlineFormatted} live</strong>
+                  <span>• {membersFormatted} members</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse" />
+                  <strong className="text-[#e5e2e1] font-semibold">
+                    {show.mediaType === 'movie' ? 'Feature Film' : 'Television Series'}
+                  </strong>
+                  <span>• {show.voteCount > 0 ? `${show.voteCount.toLocaleString()} votes` : 'Indexed'}</span>
+                </span>
               )}
+              <span>•</span>
+              <span>{show.channelsCount ? `${show.channelsCount} Active Channels` : (show.statusText || 'Community Hub')}</span>
             </div>
           </div>
 
@@ -233,14 +237,33 @@ export const ShowCard: React.FC<ShowCardProps> = ({
         </div>
 
         <div className="flex flex-col gap-2.5 pt-1">
-          {/* Community Metrics */}
+          {/* Community Metrics or TMDB Metadata */}
           <div className="flex items-center justify-between text-[#e9bcb6]/75 text-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse shrink-0" />
-              <span className="text-[#e5e2e1] font-semibold">{onlineFormatted} live</span>
-              <span className="truncate">• {membersFormatted} members</span>
-            </div>
-            <span className="shrink-0">{show.channelsCount || 36} Channels</span>
+            {show.communityMembersCount ? (
+              <>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse shrink-0" />
+                  <span className="text-[#e5e2e1] font-semibold">{onlineFormatted} live</span>
+                  <span className="truncate">• {membersFormatted} members</span>
+                </div>
+                {show.channelsCount ? <span className="shrink-0">{show.channelsCount} Channels</span> : null}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse shrink-0" />
+                  <span className="text-[#e5e2e1] font-semibold">
+                    {show.mediaType === 'movie' ? 'Film' : 'Series'}
+                  </span>
+                  <span className="truncate">
+                    • {show.voteCount > 0 ? `${show.voteCount.toLocaleString()} votes` : 'TMDB'}
+                  </span>
+                </div>
+                <span className="shrink-0 text-[11px] text-[#e9bcb6]/70">
+                  {show.releaseDate ? show.releaseDate.split('-')[0] : (show.firstAirDate ? show.firstAirDate.split('-')[0] : 'Indexed')}
+                </span>
+              </>
+            )}
           </div>
 
           {/* Action CTAs */}

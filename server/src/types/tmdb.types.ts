@@ -126,3 +126,45 @@ export interface NormalizedMediaItem {
   channelsCount?: number;
   featuredImage?: string;
 }
+
+export interface RawTmdbReview {
+  id: string;
+  author: string;
+  author_details?: {
+    name?: string;
+    username?: string;
+    avatar_path?: string | null;
+    rating?: number | null;
+  };
+  content: string;
+  created_at: string;
+  updated_at?: string;
+  url: string;
+}
+
+export interface RawTmdbReviewResponse {
+  id: number;
+  page: number;
+  results: RawTmdbReview[];
+  total_pages: number;
+  total_results: number;
+}
+
+export interface NormalizedTmdbReview {
+  id: string;
+  author: string;
+  username?: string;
+  avatarUrl?: string;
+  rating: number | null;
+  content: string;
+  createdAt: string;
+  url: string;
+}
+
+export interface ReviewsResponse {
+  id: string | number;
+  page: number;
+  results: NormalizedTmdbReview[];
+  totalPages: number;
+  totalResults: number;
+}

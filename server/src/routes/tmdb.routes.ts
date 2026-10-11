@@ -119,4 +119,30 @@ router.get('/similar/:id', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/tmdb/reviews/:id
+ * Query params: mediaType ('tv' | 'movie'), page
+ */
+router.get('/reviews/:id', async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const mediaType = (req.query.mediaType as 'tv' | 'movie') || 'tv';
+    const page = Number(req.query.page) || 1;
+
+    if (!id || id === 'undefined' || id === 'null') {
+      return res.status(400).json({ error: 'Valid media ID is required' });
+    }
+
+    if (mediaType !== 'movie' && mediaType !== 'tv') {
+      return res.status(400).json({ error: "Invalid mediaType: must be 'movie' or 'tv'" });
+    }
+
+    const data = await tmdbService.getReviews(id, mediaType, page);
+    res.json(data);
+  } catch (error: any) {
+    console.error(`Error fetching reviews for ${req.params.id}:`, error.message);
+    res.status(500).json({ error: error.message || 'Failed to fetch reviews' });
+  }
+});
+
 export default router;

@@ -64,6 +64,25 @@ export interface CommunityReview {
   createdAt: string;
 }
 
+export interface NormalizedTmdbReview {
+  id: string;
+  author: string;
+  username?: string;
+  avatarUrl?: string;
+  rating: number | null; // on 10-point scale if present
+  content: string;
+  createdAt: string;
+  url: string;
+}
+
+export interface ReviewsResponse {
+  id: string | number;
+  page: number;
+  results: NormalizedTmdbReview[];
+  totalPages: number;
+  totalResults: number;
+}
+
 export interface CommunityChannel {
   id: string;
   communityId: string;

@@ -1,16 +1,13 @@
 import { fetchFromBackend } from './client';
-import { MOCK_REVIEWS } from './mockData';
-import type { MediaItem, CommunityReview } from './types';
+import type { MediaItem, NormalizedTmdbReview } from './types';
 
 export interface SearchResults {
   shows: MediaItem[];
-  reviews: CommunityReview[];
+  reviews: NormalizedTmdbReview[];
   communities: {
     id: string;
     name: string;
     category: string;
-    membersCount: number;
-    onlineCount: number;
     poster: string;
   }[];
 }
@@ -39,28 +36,17 @@ export async function searchGlobal(query: string): Promise<SearchResults> {
   const searchResponse = await searchMedia(cleanQuery);
   const shows = searchResponse.results;
 
-  // 2. Filter community reviews matching query
-  const matchedReviews = MOCK_REVIEWS.filter(
-    (r) =>
-      r.showTitle.toLowerCase().includes(cleanQuery) ||
-      r.headline.toLowerCase().includes(cleanQuery) ||
-      r.content.toLowerCase().includes(cleanQuery) ||
-      r.tags.some((t) => t.toLowerCase().includes(cleanQuery))
-  );
-
-  // 3. Derive fan communities
+  // 2. Derive show communities without fabricated stats
   const communities = shows.map((s) => ({
     id: String(s.id),
     name: s.title,
-    category: s.genres[0] || 'Fandom',
-    membersCount: s.communityMembersCount || 10000,
-    onlineCount: s.activeOnlineCount || 1000,
+    category: s.genres[0] || 'Community Hub',
     poster: s.posterPath
   }));
 
   return {
     shows,
-    reviews: matchedReviews,
+    reviews: [],
     communities
   };
 }
