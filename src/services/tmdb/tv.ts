@@ -24,8 +24,11 @@ export async function getTvShowDetails(id: string | number): Promise<MediaItem> 
 
 export async function getTvShowCredits(
   id: string | number
-): Promise<{ cast: CastMember[]; crew: any[] }> {
-  const data = await fetchFromBackend<{ cast: CastMember[]; crew: any[] }>(
+): Promise<{ cast: CastMember[]; crew: Array<{ id: number; name: string; job?: string; department?: string }> }> {
+  const data = await fetchFromBackend<{
+    cast: CastMember[];
+    crew: Array<{ id: number; name: string; job?: string; department?: string }>;
+  }>(
     `/credits/${id}`,
     { mediaType: 'tv' }
   );
@@ -40,7 +43,15 @@ export async function getTvShowSeason(
   name: string;
   overview: string;
   seasonNumber: number;
-  episodes: any[];
+  episodes: Array<{
+    id: number;
+    name: string;
+    overview: string;
+    episodeNumber: number;
+    airDate?: string;
+    stillPath?: string;
+    voteAverage?: number;
+  }>;
 }> {
   return await fetchFromBackend(`/tv/${id}/season/${seasonNumber}`);
 }

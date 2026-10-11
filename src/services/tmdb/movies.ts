@@ -23,8 +23,11 @@ export async function getMovieDetails(id: string | number): Promise<MediaItem> {
 
 export async function getMovieCredits(
   id: string | number
-): Promise<{ cast: CastMember[]; crew: any[] }> {
-  return await fetchFromBackend<{ cast: CastMember[]; crew: any[] }>(`/credits/${id}`, {
+): Promise<{ cast: CastMember[]; crew: Array<{ id: number; name: string; job?: string; department?: string }> }> {
+  return await fetchFromBackend<{
+    cast: CastMember[];
+    crew: Array<{ id: number; name: string; job?: string; department?: string }>;
+  }>(`/credits/${id}`, {
     mediaType: 'movie'
   });
 }

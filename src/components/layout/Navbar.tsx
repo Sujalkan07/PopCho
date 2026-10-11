@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { useLocation, Link } from 'react-router-dom';
 
 interface NavbarProps {
-  activeTab?: 'home' | 'discover' | 'reviews' | 'communities';
-  onTabChange?: (tab: 'home' | 'discover' | 'reviews' | 'communities') => void;
+  activeTab?: 'home' | 'discover' | 'reviews' | 'communities' | 'community-reviews';
+  onTabChange?: (tab: 'home' | 'discover' | 'reviews' | 'communities' | 'community-reviews') => void;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   onOpenNotifications?: () => void;
@@ -10,7 +11,6 @@ interface NavbarProps {
 }
 
 export const Navbar = ({
-  activeTab = 'home',
   onTabChange,
   searchQuery = '',
   onSearchChange,
@@ -20,66 +20,69 @@ export const Navbar = ({
   const [profileOpen, setProfileOpen] = useState(false);
   const [friendsCount] = useState(8);
   const [notifCount, setNotifCount] = useState(3);
+  const location = useLocation();
+
+  const currentTab = useMemo(() => {
+    const p = location.pathname;
+    if (p.startsWith('/discover')) return 'discover';
+    if (
+      p.startsWith('/reviews') ||
+      p.startsWith('/communities') ||
+      p.startsWith('/community-reviews')
+    ) {
+      return 'community-reviews';
+    }
+    return 'home';
+  }, [location.pathname]);
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-[#0e0e0e]/95 backdrop-blur-md border-b border-[#353534]">
       <div className="h-[68px] w-full max-w-[1536px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
         {/* Brand & Main Navigation */}
         <div className="flex items-center gap-6 xl:gap-8 flex-shrink-0">
-          <a className="flex items-center gap-2.5 group" href="/">
+          <Link className="flex items-center gap-2.5 group" to="/">
             <div className="w-8 h-8 rounded-lg bg-[#e50914] flex items-center justify-center font-extrabold text-white text-base shadow-[0_0_14px_rgba(229,9,20,0.6)] group-hover:scale-105 transition-transform">
               <span className="material-symbols-outlined text-xl">movie_filter</span>
             </div>
             <span className="font-headline-md text-xl uppercase tracking-wider text-[#e5e2e1] font-extrabold flex items-center">
               POP<span className="text-[#e50914] drop-shadow-[0_0_8px_rgba(229,9,20,0.6)]">CHO</span>
             </span>
-          </a>
+          </Link>
 
           <nav className="hidden lg:flex items-center gap-1.5">
-            <button
-              type="button"
+            <Link
+              to="/"
               onClick={() => onTabChange?.('home')}
               className={`px-4 py-2 font-label-lg text-sm rounded-xl transition-all cursor-pointer ${
-                activeTab === 'home'
+                currentTab === 'home'
                   ? 'bg-[#e50914] text-white font-bold shadow-[0_0_12px_rgba(229,9,20,0.45)]'
                   : 'text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#201f1f]'
               }`}
             >
               Home
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              to="/discover"
               onClick={() => onTabChange?.('discover')}
               className={`px-4 py-2 font-label-lg text-sm rounded-xl transition-all cursor-pointer ${
-                activeTab === 'discover'
+                currentTab === 'discover'
                   ? 'bg-[#e50914] text-white font-bold shadow-[0_0_12px_rgba(229,9,20,0.45)]'
                   : 'text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#201f1f]'
               }`}
             >
               Discover
-            </button>
-            <button
-              type="button"
-              onClick={() => onTabChange?.('reviews')}
+            </Link>
+            <Link
+              to="/reviews"
+              onClick={() => onTabChange?.('community-reviews')}
               className={`px-4 py-2 font-label-lg text-sm rounded-xl transition-all cursor-pointer ${
-                activeTab === 'reviews'
+                currentTab === 'community-reviews'
                   ? 'bg-[#e50914] text-white font-bold shadow-[0_0_12px_rgba(229,9,20,0.45)]'
                   : 'text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#201f1f]'
               }`}
             >
-              Reviews
-            </button>
-            <button
-              type="button"
-              onClick={() => onTabChange?.('communities')}
-              className={`px-4 py-2 font-label-lg text-sm rounded-xl transition-all cursor-pointer ${
-                activeTab === 'communities'
-                  ? 'bg-[#e50914] text-white font-bold shadow-[0_0_12px_rgba(229,9,20,0.45)]'
-                  : 'text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#201f1f]'
-              }`}
-            >
-              Communities
-            </button>
+              Community &amp; Reviews
+            </Link>
           </nav>
         </div>
 
@@ -107,7 +110,7 @@ export const Navbar = ({
           <button
             type="button"
             onClick={onOpenFriends}
-            className="relative flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#201f1f] hover:bg-[#2a2a2a] text-[#e9bcb6] hover:text-[#e5e2e1] transition-all border border-[#353534]/50"
+            className="relative flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#201f1f] hover:bg-[#2a2a2a] text-[#e9bcb6] hover:text-[#e5e2e1] transition-all border border-[#353534]/50 cursor-pointer"
             title="Friends online"
           >
             <span className="material-symbols-outlined text-lg">group</span>
@@ -122,7 +125,7 @@ export const Navbar = ({
               setNotifCount(0);
               onOpenNotifications?.();
             }}
-            className="relative p-2 rounded-xl bg-[#201f1f] hover:bg-[#2a2a2a] text-[#e9bcb6] hover:text-[#e5e2e1] transition-all border border-[#353534]/50"
+            className="relative p-2 rounded-xl bg-[#201f1f] hover:bg-[#2a2a2a] text-[#e9bcb6] hover:text-[#e5e2e1] transition-all border border-[#353534]/50 cursor-pointer"
             title="Notifications"
           >
             <span className="material-symbols-outlined text-xl">notifications</span>
@@ -138,7 +141,7 @@ export const Navbar = ({
             <button
               type="button"
               onClick={() => setProfileOpen(!profileOpen)}
-              className="flex items-center gap-1.5 pl-2 border-l border-[#353534] focus:outline-none"
+              className="flex items-center gap-1.5 pl-2 border-l border-[#353534] focus:outline-none cursor-pointer"
             >
               <div className="relative">
                 <img
@@ -164,15 +167,24 @@ export const Navbar = ({
                   </p>
                 </div>
                 <div className="py-1">
-                  <a href="#profile" className="flex items-center gap-2 px-4 py-2 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#2a2a2a]">
+                  <a
+                    href="#profile"
+                    className="flex items-center gap-2 px-4 py-2 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#2a2a2a]"
+                  >
                     <span className="material-symbols-outlined text-base">person</span>
                     View Fan Profile
                   </a>
-                  <a href="#watchlist" className="flex items-center gap-2 px-4 py-2 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#2a2a2a]">
+                  <a
+                    href="#watchlist"
+                    className="flex items-center gap-2 px-4 py-2 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#2a2a2a]"
+                  >
                     <span className="material-symbols-outlined text-base">bookmark</span>
                     My Watchlist &amp; Hubs
                   </a>
-                  <a href="#settings" className="flex items-center gap-2 px-4 py-2 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#2a2a2a]">
+                  <a
+                    href="#settings"
+                    className="flex items-center gap-2 px-4 py-2 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#2a2a2a]"
+                  >
                     <span className="material-symbols-outlined text-base">settings</span>
                     Account &amp; Spoiler Settings
                   </a>
@@ -181,7 +193,7 @@ export const Navbar = ({
                   <button
                     type="button"
                     onClick={() => setProfileOpen(false)}
-                    className="w-full text-left flex items-center gap-2 px-4 py-2 text-xs text-[#ffb4ab] hover:bg-[#93000a]/20"
+                    className="w-full text-left flex items-center gap-2 px-4 py-2 text-xs text-[#ffb4ab] hover:bg-[#93000a]/20 cursor-pointer"
                   >
                     <span className="material-symbols-outlined text-base">logout</span>
                     Sign Out
@@ -191,6 +203,40 @@ export const Navbar = ({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Mobile Subnavigation Row */}
+      <div className="flex lg:hidden items-center justify-around w-full px-4 py-2 bg-[#131313] border-t border-[#353534]/50">
+        <Link
+          to="/"
+          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+            currentTab === 'home'
+              ? 'bg-[#e50914] text-white shadow'
+              : 'text-[#e9bcb6] hover:text-white'
+          }`}
+        >
+          Home
+        </Link>
+        <Link
+          to="/discover"
+          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+            currentTab === 'discover'
+              ? 'bg-[#e50914] text-white shadow'
+              : 'text-[#e9bcb6] hover:text-white'
+          }`}
+        >
+          Discover
+        </Link>
+        <Link
+          to="/reviews"
+          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+            currentTab === 'community-reviews'
+              ? 'bg-[#e50914] text-white shadow'
+              : 'text-[#e9bcb6] hover:text-white'
+          }`}
+        >
+          Community &amp; Reviews
+        </Link>
       </div>
     </header>
   );
