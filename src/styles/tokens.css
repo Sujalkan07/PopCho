@@ -1,0 +1,55 @@
+:root {
+  /* Brand colors */
+  --color-accent: #e50914;
+  --color-accent-hover: #bd0610;
+
+  /* Background colors */
+  --color-background: #131313;
+  --color-navigation: #0b0b0b;
+  --color-surface: #1f1f1f;
+  --color-surface-elevated: #262626;
+
+  /* Borders */
+  --color-border: #303030;
+  --color-border-hover: #484848;
+
+  /* Text colors */
+  --color-text-primary: #f5f5f5;
+  --color-text-secondary: #b3b3b3;
+  --color-text-muted: #808080;
+
+  /* Status colors */
+  --color-success: #46d369;
+  --color-error: #ff4d5a;
+
+  /* Typography */
+  --font-primary: 'Plus Jakarta Sans', Arial, sans-serif;
+
+  /* Font sizes */
+  --font-xs: 0.75rem;
+  --font-sm: 0.875rem;
+  --font-base: 1rem;
+  --font-lg: 1.125rem;
+  --font-xl: 1.5rem;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadows */
+  --shadow-card: 0 8px 24px rgb(0 0 0 / 20%);
+
+  /* Layout */
+  --content-max-width: 1440px;
+  --sidebar-width: 240px;
+}

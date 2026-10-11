@@ -1,0 +1,127 @@
+@import "tailwindcss";
+@import './styles/tokens.css';
+
+@theme {
+  --color-surface: #131313;
+  --color-surface-dim: #131313;
+  --color-surface-bright: #393939;
+  --color-surface-container-lowest: #0e0e0e;
+  --color-surface-container-low: #1c1b1b;
+  --color-surface-container: #201f1f;
+  --color-surface-container-high: #2a2a2a;
+  --color-surface-container-highest: #353534;
+  --color-surface-variant: #353534;
+
+  --color-on-surface: #e5e2e1;
+  --color-on-surface-variant: #e9bcb6;
+  --color-inverse-surface: #e5e2e1;
+  --color-inverse-on-surface: #313030;
+
+  --color-primary: #ffb4aa;
+  --color-primary-container: #e50914;
+  --color-on-primary: #690003;
+  --color-on-primary-container: #fff7f6;
+  --color-inverse-primary: #c0000c;
+
+  --color-secondary: #ffb4aa;
+  --color-secondary-container: #b2000d;
+  --color-on-secondary-container: #ffbdb5;
+  --color-secondary-fixed: #ffdad5;
+  --color-secondary-fixed-dim: #ffb4aa;
+
+  --color-tertiary: #70dc8e;
+  --color-tertiary-container: #008442;
+  --color-on-tertiary-container: #e8ffe8;
+  --color-tertiary-fixed: #8cf9a8;
+  --color-tertiary-fixed-dim: #70dc8e;
+
+  --color-error: #ffb4ab;
+  --color-error-container: #93000a;
+  --color-on-error-container: #ffdad6;
+
+  --color-outline: #af8782;
+  --color-outline-variant: #5e3f3b;
+
+  --spacing-gutter: 1.5rem;
+  --spacing-gutter-mobile: 1rem;
+  --spacing-space-xs: 0.25rem;
+  --spacing-space-sm: 0.5rem;
+  --spacing-space-md: 1rem;
+  --spacing-space-lg: 1.5rem;
+  --spacing-space-xl: 2.5rem;
+
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-headline-xl: 'Plus Jakarta Sans', sans-serif;
+  --font-headline-lg: 'Plus Jakarta Sans', sans-serif;
+  --font-headline-md: 'Plus Jakarta Sans', sans-serif;
+  --font-headline-sm: 'Plus Jakarta Sans', sans-serif;
+  --font-body-lg: 'Plus Jakarta Sans', sans-serif;
+  --font-body-md: 'Plus Jakarta Sans', sans-serif;
+  --font-body-sm: 'Plus Jakarta Sans', sans-serif;
+  --font-label-lg: 'Plus Jakarta Sans', sans-serif;
+  --font-label-md: 'Plus Jakarta Sans', sans-serif;
+  --font-label-sm: 'Plus Jakarta Sans', sans-serif;
+
+  --text-display: 48px;
+  --text-display--line-height: 56px;
+  --text-headline-xl: 36px;
+  --text-headline-xl--line-height: 44px;
+  --text-headline-lg: 24px;
+  --text-headline-lg--line-height: 32px;
+  --text-headline-md: 20px;
+  --text-headline-md--line-height: 28px;
+  --text-headline-sm: 16px;
+  --text-headline-sm--line-height: 24px;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 26px;
+  --text-body-md: 14px;
+  --text-body-md--line-height: 22px;
+  --text-body-sm: 13px;
+  --text-body-sm--line-height: 18px;
+  --text-label-lg: 14px;
+  --text-label-lg--line-height: 20px;
+  --text-label-md: 12px;
+  --text-label-md--line-height: 16px;
+  --text-label-sm: 10px;
+  --text-label-sm--line-height: 14px;
+}
+
+:root {
+  font-family: var(--font-primary);
+  color: #e5e2e1;
+  background: #131313;
+  color-scheme: dark;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background-color: #131313;
+  color: #e5e2e1;
+}
+
+/* Material symbols adjustments */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #131313;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #393939;
+}
