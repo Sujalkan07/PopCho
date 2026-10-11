@@ -3,18 +3,18 @@ import React from 'react';
 export interface FilterGenre {
   id: string;
   label: string;
-  count: number;
+  count?: number;
 }
 
 export const GENRE_FILTERS: FilterGenre[] = [
-  { id: 'all', label: 'All Shows', count: 1248 },
-  { id: 'Sci-Fi & Fantasy', label: 'Sci-Fi & Fantasy', count: 240 },
-  { id: 'Psychological Thriller', label: 'Psychological Thriller', count: 185 },
-  { id: 'Dark Mystery', label: 'Dark Mystery', count: 142 },
-  { id: 'Crime & Drama', label: 'Crime & Drama', count: 210 },
-  { id: 'Animation & Anime', label: 'Animation & Anime', count: 198 },
-  { id: 'Dystopian', label: 'Dystopian', count: 84 },
-  { id: 'Comedy & Satire', label: 'Comedy & Satire', count: 189 },
+  { id: 'all', label: 'All Shows' },
+  { id: 'Sci-Fi & Fantasy', label: 'Sci-Fi & Fantasy' },
+  { id: 'Psychological Thriller', label: 'Psychological Thriller' },
+  { id: 'Dark Mystery', label: 'Dark Mystery' },
+  { id: 'Crime & Drama', label: 'Crime & Drama' },
+  { id: 'Animation & Anime', label: 'Animation & Anime' },
+  { id: 'Dystopian', label: 'Dystopian' },
+  { id: 'Comedy & Satire', label: 'Comedy & Satire' },
 ];
 
 interface DirectoryControlsProps {
@@ -28,6 +28,7 @@ interface DirectoryControlsProps {
   onToggleViewMode: (mode: 'grid' | 'list') => void;
   showingCount: number;
   totalCount: number;
+  genreCounts?: Record<string, number>;
   onOpenAdvancedFilters?: () => void;
 }
 
@@ -42,6 +43,7 @@ export const DirectoryControls: React.FC<DirectoryControlsProps> = ({
   onToggleViewMode,
   showingCount,
   totalCount,
+  genreCounts,
   onOpenAdvancedFilters,
 }) => {
   return (
@@ -129,7 +131,8 @@ export const DirectoryControls: React.FC<DirectoryControlsProps> = ({
                   : 'bg-[#201f1f] hover:bg-[#2a2a2a] text-[#e9bcb6] hover:text-[#e5e2e1] border-[#353534]'
               }`}
             >
-              {genre.label} ({genre.count})
+              {genre.label}
+              {genreCounts && (genre.id === 'all' ? ` (${totalCount})` : typeof genreCounts[genre.id] === 'number' ? ` (${genreCounts[genre.id]})` : '')}
             </button>
           );
         })}
@@ -145,7 +148,7 @@ export const DirectoryControls: React.FC<DirectoryControlsProps> = ({
           <span className="text-[#353534]">•</span>
           <span className="text-[#70dc8e] font-semibold flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-[#70dc8e] animate-pulse" />
-            Live watchrooms active in 81 hubs
+            Verified TMDB Entertainment Sync
           </span>
         </div>
 

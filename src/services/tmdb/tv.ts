@@ -1,10 +1,10 @@
 import { fetchFromBackend } from './client';
 import type { MediaItem, CastMember } from './types';
 
-export async function getTrendingTvShows(): Promise<MediaItem[]> {
+export async function getTrendingTvShows(page: number = 1): Promise<MediaItem[]> {
   const data = await fetchFromBackend<{ results: MediaItem[]; total: number; page: number }>(
     '/trending',
-    { mediaType: 'tv', timeWindow: 'week' }
+    { mediaType: 'tv', timeWindow: 'week', page }
   );
   return data.results;
 }

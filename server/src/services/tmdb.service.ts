@@ -150,8 +150,8 @@ export function normalizeMediaItem(
 
   const title = raw.name || raw.title || 'Untitled';
   const idStr = String(raw.id);
-  const voteAvg = raw.vote_average ? Math.round(raw.vote_average * 10) / 10 : 7.5;
-  const voteCount = raw.vote_count || 120;
+  const voteAvg = typeof raw.vote_average === 'number' && raw.vote_average > 0 ? Math.round(raw.vote_average * 10) / 10 : 0;
+  const voteCount = raw.vote_count || 0;
 
   // Determine genres
   let genres: string[] = [];
@@ -217,14 +217,15 @@ export class TmdbService {
    */
   async getTrending(
     mediaType: 'all' | 'movie' | 'tv' = 'all',
-    timeWindow: 'day' | 'week' = 'week'
+    timeWindow: 'day' | 'week' = 'week',
+    page: number = 1
   ): Promise<{ results: NormalizedMediaItem[]; total: number; page: number }> {
     const rawData = await fetchTmdb<{
       page: number;
       results: RawTmdbMedia[];
       total_results: number;
       total_pages: number;
-    }>(`/trending/${mediaType}/${timeWindow}`);
+    }>(`/trending/${mediaType}/${timeWindow}`, { page });
 
     const filtered = (rawData.results || []).filter(
       (item) => item.media_type !== 'person'
@@ -311,8 +312,8 @@ export class TmdbService {
     );
 
     const title = raw.name || raw.title || 'Untitled';
-    const voteAvg = raw.vote_average ? Math.round(raw.vote_average * 10) / 10 : 7.5;
-    const voteCount = raw.vote_count || 100;
+    const voteAvg = typeof raw.vote_average === 'number' && raw.vote_average > 0 ? Math.round(raw.vote_average * 10) / 10 : 0;
+    const voteCount = raw.vote_count || 0;
     const genres = raw.genres ? raw.genres.map((g) => g.name) : ['Drama'];
     const network = raw.networks && raw.networks.length > 0 ? raw.networks[0].name : undefined;
 

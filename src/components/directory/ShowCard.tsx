@@ -1,5 +1,6 @@
 import React from 'react';
 import type { MediaItem } from '../../services/tmdb/types';
+import { DEFAULT_POSTER } from '../../services/tmdb/client';
 
 interface ShowCardProps {
   show: MediaItem;
@@ -18,15 +19,16 @@ export const ShowCard: React.FC<ShowCardProps> = ({
   onJoinHub,
   onViewReviews,
 }) => {
-  const imageSrc = show.featuredImage || show.backdropPath || show.posterPath;
+  const imageSrc = show.featuredImage || show.backdropPath || show.posterPath || DEFAULT_POSTER;
+  const ratingDisplay = show.voteAverage && show.voteAverage > 0 ? show.voteAverage.toFixed(1) : 'NR';
   const onlineFormatted =
     show.activeOnlineCount && show.activeOnlineCount >= 1000
       ? `${(show.activeOnlineCount / 1000).toFixed(1)}k`
-      : `${show.activeOnlineCount || 1200}`;
+      : `${show.activeOnlineCount || 120}`;
   const membersFormatted =
     show.communityMembersCount && show.communityMembersCount >= 1000
       ? `${(show.communityMembersCount / 1000).toFixed(1)}k`
-      : `${show.communityMembersCount || 45000}`;
+      : `${show.communityMembersCount || 4500}`;
 
   const isRedBadge = show.hubBadgeType === 'secondary' || show.hubBadgeType === 'primary';
 
@@ -38,6 +40,9 @@ export const ShowCard: React.FC<ShowCardProps> = ({
           <img
             src={imageSrc}
             alt={show.title}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = DEFAULT_POSTER;
+            }}
             className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
             loading="lazy"
           />
@@ -76,7 +81,7 @@ export const ShowCard: React.FC<ShowCardProps> = ({
                 <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
                   star
                 </span>
-                <span className="text-sm text-[#e5e2e1]">{show.voteAverage.toFixed(1)}</span>
+                <span className="text-sm text-[#e5e2e1]">{ratingDisplay}</span>
               </div>
             </div>
 
@@ -146,6 +151,9 @@ export const ShowCard: React.FC<ShowCardProps> = ({
         <img
           src={imageSrc}
           alt={show.title}
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = DEFAULT_POSTER;
+          }}
           className="absolute inset-0 w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
           loading="lazy"
         />
@@ -215,7 +223,7 @@ export const ShowCard: React.FC<ShowCardProps> = ({
               <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
                 star
               </span>
-              <span className="text-xs text-[#e5e2e1]">{show.voteAverage.toFixed(1)}</span>
+              <span className="text-xs text-[#e5e2e1]">{ratingDisplay}</span>
             </div>
           </div>
 

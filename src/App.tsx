@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { DirectoryHeader } from './components/directory/DirectoryHeader';
@@ -12,6 +12,7 @@ import { JoinHubModal } from './components/chat/JoinHubModal';
 import { CommunityChatWorkspace } from './components/chat/CommunityChatWorkspace';
 import { getTrendingTvShows } from './services/tmdb/tv';
 import { getTrendingMovies } from './services/tmdb/movies';
+import { searchMedia } from './services/tmdb/search';
 import type { MediaItem } from './services/tmdb/types';
 
 export function App() {
@@ -21,10 +22,21 @@ export function App() {
   const [sortBy, setSortBy] = useState('active');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // TMDB data state
+  // TMDB data state & pagination
   const [shows, setShows] = useState<MediaItem[]>([]);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Live search state
+  const [searchResults, setSearchResults] = useState<MediaItem[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Notification and friends popover states
+  const [notificationToast, setNotificationToast] = useState<string | null>(null);
+  const [activeFilterNotice, setActiveFilterNotice] = useState(false);
 
   // Bookmarked show IDs with localStorage persistence
   const [bookmarkedIds, setBookmarkedIds] = useState<Record<string | number, boolean>>(() => {
@@ -36,21 +48,103 @@ export function App() {
     }
   });
 
-  // Load TMDB data on mount
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [tv, movies] = await Promise.all([getTrendingTvShows(), getTrendingMovies()]);
-        setShows([...tv, ...movies]);
-      } catch (e) {
-        console.error('Failed to fetch TMDB data', e);
-        setError('Failed to load content from TMDB. Check that the backend server is running.');
-      } finally {
-        setLoading(false);
+  // Load initial TMDB data on mount
+  const loadInitialData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [tv, movies] = await Promise.all([
+        getTrendingTvShows(1),
+        getTrendingMovies(1)
+      ]);
+      // Deduplicate initial TV and Movie list
+      const combined = [...tv];
+      const seen = new Set(tv.map((item) => String(item.id)));
+      for (const m of movies) {
+        if (!seen.has(String(m.id))) {
+          combined.push(m);
+          seen.add(String(m.id));
+        }
       }
-    };
-    loadData();
+      setShows(combined);
+      setPage(1);
+      setHasMore(true);
+    } catch (e: any) {
+      console.error('Failed to fetch TMDB data', e);
+      setError(e.message || 'Failed to connect to TMDB via backend proxy. Please verify the server is running on port 5000.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  // Handle Load More (Pagination)
+  const handleLoadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const [tv, movies] = await Promise.all([
+        getTrendingTvShows(nextPage),
+        getTrendingMovies(nextPage)
+      ]);
+      const newBatch = [...tv, ...movies];
+
+      if (newBatch.length === 0) {
+        setHasMore(false);
+      } else {
+        setShows((prev) => {
+          const seen = new Set(prev.map((s) => String(s.id)));
+          const uniqueNew = newBatch.filter((s) => !seen.has(String(s.id)));
+          if (uniqueNew.length === 0) {
+            setHasMore(false);
+            return prev;
+          }
+          return [...prev, ...uniqueNew];
+        });
+        setPage(nextPage);
+      }
+    } catch (err) {
+      console.error('Failed to paginate TMDB shows', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Real-time debounced TMDB Search
+  useEffect(() => {
+    const clean = searchQuery.trim();
+    if (clean.length < 2) {
+      setSearchResults(null);
+      setIsSearching(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const resp = await searchMedia(clean);
+        // Deduplicate search results by ID
+        const seen = new Set<string>();
+        const uniqueResults = resp.results.filter((item) => {
+          const id = String(item.id);
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        });
+        setSearchResults(uniqueResults);
+      } catch (err) {
+        console.error('TMDB search error:', err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Modal & Workspace States
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
@@ -71,12 +165,24 @@ export function App() {
     });
   };
 
-  // Filter and sort shows — uses live TMDB data
-  const filteredShows = useMemo(() => {
-    let result = [...shows];
+  // Dynamic genre frequency computed from loaded catalog
+  const genreCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const dataset = searchResults !== null ? searchResults : shows;
+    dataset.forEach((item) => {
+      item.genres.forEach((g) => {
+        counts[g] = (counts[g] || 0) + 1;
+      });
+    });
+    return counts;
+  }, [shows, searchResults]);
 
-    // 1. Search Query filter
-    if (searchQuery.trim()) {
+  // Filter and sort shows — operates on live search or catalog
+  const filteredShows = useMemo(() => {
+    let result = searchResults !== null ? [...searchResults] : [...shows];
+
+    // 1. Client query refinement if searching
+    if (searchResults === null && searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(
         (s) =>
@@ -96,7 +202,7 @@ export function App() {
     if (sortBy === 'rating') {
       result.sort((a, b) => b.voteAverage - a.voteAverage);
     } else if (sortBy === 'recent') {
-      result.sort((a, b) => (b.firstAirDate || '').localeCompare(a.firstAirDate || ''));
+      result.sort((a, b) => (b.firstAirDate || b.releaseDate || '').localeCompare(a.firstAirDate || a.releaseDate || ''));
     } else if (sortBy === 'trending') {
       result.sort((a, b) => (b.activeOnlineCount || 0) - (a.activeOnlineCount || 0));
     } else {
@@ -105,7 +211,14 @@ export function App() {
     }
 
     return result;
-  }, [searchQuery, selectedGenre, sortBy, shows]);
+  }, [searchQuery, selectedGenre, sortBy, shows, searchResults]);
+
+  // Toast auto-clear
+  useEffect(() => {
+    if (!notificationToast) return;
+    const t = setTimeout(() => setNotificationToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [notificationToast]);
 
   // If user opened the full interactive community workspace
   if (activeWorkspaceShow) {
@@ -130,14 +243,26 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-[#131313] text-[#e5e2e1] flex flex-col antialiased selection:bg-[#e50914] selection:text-white">
+      {/* Toast Notification */}
+      {notificationToast && (
+        <aside
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-[#201f1f] text-[#e5e2e1] border border-[#e50914]/40 shadow-2xl animate-fade-in text-xs font-semibold"
+        >
+          <span className="material-symbols-outlined text-[#e50914] text-lg">info</span>
+          <span>{notificationToast}</span>
+        </aside>
+      )}
+
       {/* Fixed PopCho Navbar */}
       <Navbar
         activeTab={activeTab}
         onTabChange={setActiveTab}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        onOpenNotifications={() => alert('No new mentions. All 3 notifications marked read.')}
-        onOpenFriends={() => alert('Friends list: 8 friends online in #upside-down-theories and #winden-quantum.')}
+        onOpenNotifications={() => setNotificationToast('3 unread mentions in #upside-down-theories.')}
+        onOpenFriends={() => setNotificationToast('8 friends online across PopCho community hubs.')}
       />
 
       {/* Main Content Area */}
@@ -149,27 +274,42 @@ export function App() {
 
           <div className="max-w-[1536px] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6">
             {/* Directory Hero Header */}
-            <DirectoryHeader />
+            <DirectoryHeader
+              totalHubsCount={searchResults !== null ? searchResults.length : shows.length}
+              isLiveSync={!error}
+            />
 
             {/* Loading State */}
             {loading && (
-              <div className="flex items-center justify-center py-16 gap-3">
+              <div className="flex items-center justify-center py-20 gap-3">
                 <span className="material-symbols-outlined text-3xl text-[#e50914] animate-spin">
                   progress_activity
                 </span>
-                <span className="text-[#e9bcb6]/75 text-sm font-medium">Loading show hubs from TMDB…</span>
+                <span className="text-[#e9bcb6]/75 text-sm font-medium">
+                  Connecting to TMDB via backend proxy…
+                </span>
               </div>
             )}
 
-            {/* Error State */}
+            {/* Error State with Retry Button */}
             {!loading && error && (
-              <div className="flex items-center gap-3 px-5 py-4 rounded-xl bg-[#2a0a0a] border border-[#e50914]/40 text-[#e9bcb6]">
-                <span className="material-symbols-outlined text-[#e50914] text-xl">error</span>
-                <span className="text-sm">{error}</span>
+              <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl bg-[#2a0a0a] border border-[#e50914]/40 text-[#e9bcb6]">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-[#e50914] text-xl">error</span>
+                  <span className="text-sm">{error}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadInitialData}
+                  className="px-4 py-2 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white text-xs font-bold transition-all shadow-md shrink-0 flex items-center gap-1.5 active:scale-95"
+                >
+                  <span className="material-symbols-outlined text-sm">refresh</span>
+                  <span>Try Again</span>
+                </button>
               </div>
             )}
 
-            {/* Omnibox Search, Genre Chips & View Controls — only shown when data is loaded */}
+            {/* Omnibox Search, Genre Chips & View Controls */}
             {!loading && !error && (
               <>
                 <DirectoryControls
@@ -182,11 +322,39 @@ export function App() {
                   viewMode={viewMode}
                   onToggleViewMode={setViewMode}
                   showingCount={filteredShows.length}
-                  totalCount={shows.length}
-                  onOpenAdvancedFilters={() =>
-                    alert('Advanced filter options: Filter by Streaming Network (Netflix, HBO, Apple), Season Count, and Spoiler Tolerance.')
-                  }
+                  totalCount={searchResults !== null ? searchResults.length : shows.length}
+                  genreCounts={genreCounts}
+                  onOpenAdvancedFilters={() => setActiveFilterNotice(!activeFilterNotice)}
                 />
+
+                {/* Advanced Filter Collapsible Panel */}
+                {activeFilterNotice && (
+                  <div className="p-4 rounded-xl bg-[#1c1b1b] border border-[#353534] flex flex-wrap items-center justify-between gap-3 text-xs text-[#e9bcb6]">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[#e50914] text-lg">tune</span>
+                      <span>
+                        Filter by streaming network (Netflix, Apple TV+, HBO) &amp; spoiler tolerance in active development.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFilterNotice(false)}
+                      className="px-3 py-1 rounded-lg bg-[#2a2a2a] hover:bg-[#353534] text-[#e5e2e1] text-xs font-semibold"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+
+                {/* Live Search Indicator */}
+                {isSearching && (
+                  <div className="flex items-center gap-2 py-2 text-xs text-[#e9bcb6]/75">
+                    <span className="material-symbols-outlined text-sm text-[#e50914] animate-spin">
+                      progress_activity
+                    </span>
+                    <span>Searching TMDB movies and TV shows for "{searchQuery}"…</span>
+                  </div>
+                )}
 
                 {/* Catalog Grid (Responsive 1-4 columns desktop) */}
                 {filteredShows.length === 0 ? (
@@ -194,16 +362,18 @@ export function App() {
                     <span className="material-symbols-outlined text-5xl text-[#e50914]">
                       search_off
                     </span>
-                    <h3 className="text-xl font-bold text-[#e5e2e1]">No Show Hubs Match Your Search</h3>
+                    <h3 className="text-xl font-bold text-[#e5e2e1]">No Show Hubs Found</h3>
                     <p className="text-sm text-[#e9bcb6]/75 max-w-md">
-                      We couldn't find any show hubs matching "{searchQuery}". You can submit a fan petition to create one!
+                      {searchQuery
+                        ? `We couldn't find any titles matching "${searchQuery}". Submit a community petition to build a dedicated hub!`
+                        : 'No show hubs found in this genre category.'}
                     </p>
                     <button
                       type="button"
                       onClick={() => setIsRequestModalOpen(true)}
-                      className="mt-2 px-5 py-2.5 rounded-xl bg-[#e50914] text-white font-bold text-xs shadow-md"
+                      className="mt-2 px-5 py-2.5 rounded-xl bg-[#e50914] text-white font-bold text-xs shadow-md active:scale-95 transition-all"
                     >
-                      Petition for "{searchQuery}"
+                      Petition for {searchQuery ? `"${searchQuery}"` : 'New Show Hub'}
                     </button>
                   </div>
                 ) : (
@@ -228,40 +398,62 @@ export function App() {
                   </div>
                 )}
 
-                {/* Load More & Infinite Scroll Indicator */}
-                <div className="flex flex-col items-center justify-center gap-2 py-4">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      alert('24 additional curated fandom hubs loaded into active view stream!')
-                    }
-                    className="flex items-center gap-2 px-8 py-3.5 rounded-xl bg-[#201f1f] hover:bg-[#2a2a2a] text-[#e5e2e1] text-sm font-bold transition-all shadow-md border border-[#353534] group"
-                  >
-                    <span className="material-symbols-outlined text-lg group-hover:translate-y-0.5 transition-transform">
-                      expand_more
+                {/* Load More & Infinite Scroll Indicator (only when not searching) */}
+                {searchResults === null && (
+                  <div className="flex flex-col items-center justify-center gap-2 py-6">
+                    {hasMore ? (
+                      <button
+                        type="button"
+                        onClick={handleLoadMore}
+                        disabled={loadingMore}
+                        className="flex items-center gap-2 px-8 py-3.5 rounded-xl bg-[#201f1f] hover:bg-[#2a2a2a] disabled:opacity-50 text-[#e5e2e1] text-sm font-bold transition-all shadow-md border border-[#353534] group active:scale-98 cursor-pointer"
+                      >
+                        {loadingMore ? (
+                          <>
+                            <span className="material-symbols-outlined text-lg animate-spin text-[#e50914]">
+                              progress_activity
+                            </span>
+                            <span>Loading Next 20 Hubs…</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="material-symbols-outlined text-lg group-hover:translate-y-0.5 transition-transform text-[#e50914]">
+                              expand_more
+                            </span>
+                            <span>Load Next 20 Shows</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-[#e9bcb6]/60 font-medium">
+                        All curated TMDB titles loaded ({shows.length} shows active in catalog)
+                      </span>
+                    )}
+                    <span className="text-xs text-[#e9bcb6]/60">
+                      Showing {filteredShows.length} of {shows.length} Loaded • Page {page}
                     </span>
-                    <span>Load Next 24 Shows</span>
-                  </button>
-                  <span className="text-xs text-[#e9bcb6]/60">
-                    Showing {filteredShows.length} of {shows.length} • TMDB Live Data
-                  </span>
-                </div>
+                  </div>
+                )}
               </>
             )}
 
             {/* Curated Franchise & Universe Clusters */}
             <UniverseClusters
               onSelectCluster={(clusterTitle) => {
-                alert(`Viewing canonical universe lore tree for: ${clusterTitle}`);
+                // Filter the catalog by universe keyword dynamically
+                const keyword = clusterTitle.split(' ')[0];
+                setSearchQuery(keyword);
+                setNotificationToast(`Filtered catalog for "${clusterTitle}" universe.`);
               }}
             />
 
             {/* Request Hub Petition Banner Callout */}
             <PetitionBanner
               onRequestHubClick={() => setIsRequestModalOpen(true)}
-              onViewRequestsClick={() =>
-                alert('Viewing 34 active community petitions: Shōgun (48 votes), Fallout (46 votes), Severance S2 (49 votes).')
-              }
+              onViewRequestsClick={() => {
+                setIsRequestModalOpen(true);
+                setNotificationToast('Open community petitions: Shōgun, Fallout, Severance S2.');
+              }}
             />
           </div>
         </div>
@@ -275,7 +467,7 @@ export function App() {
         isOpen={isRequestModalOpen}
         onClose={() => setIsRequestModalOpen(false)}
         onSubmitPetition={(title) => {
-          console.log('Petition submitted:', title);
+          setNotificationToast(`Petition for "${title}" successfully submitted!`);
         }}
       />
 

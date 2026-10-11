@@ -11,7 +11,8 @@ router.get('/trending', async (req: Request, res: Response) => {
   try {
     const mediaType = (req.query.mediaType as 'all' | 'movie' | 'tv') || 'all';
     const timeWindow = (req.query.timeWindow as 'day' | 'week') || 'week';
-    const data = await tmdbService.getTrending(mediaType, timeWindow);
+    const page = Number(req.query.page) || 1;
+    const data = await tmdbService.getTrending(mediaType, timeWindow, page);
     res.json(data);
   } catch (error: any) {
     console.error('Error fetching trending media:', error.message);

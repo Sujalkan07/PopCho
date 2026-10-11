@@ -1,7 +1,15 @@
+import dns from 'node:dns';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import { config } from './config.js';
 import tmdbRoutes from './routes/tmdb.routes.js';
+
+// Prioritize IPv4 resolution to prevent connect timeouts on dual-stack hosts
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  // Ignore if unsupported in environment
+}
 
 const app = express();
 
