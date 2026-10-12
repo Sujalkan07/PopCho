@@ -102,7 +102,21 @@ export class ChatService {
   }
 
   /**
-   * Get messages for a channel with pagination
+   * Verify that a channel belongs to a specific community
+   */
+  async verifyChannelInCommunity(communityId: string, channelId: string): Promise<boolean> {
+    const channel = await prisma.channel.findFirst({
+      where: {
+        id: channelId,
+        communityId,
+      },
+      select: { id: true },
+    });
+    return Boolean(channel);
+  }
+
+  /**
+   * Get messages for a channel with pagination (newest messages first, returned in chronological order)
    */
   async getChannelMessages(channelId: string, options: { limit?: number; before?: string }) {
     const limit = Math.min(100, Math.max(1, Number(options.limit) || 50));
@@ -118,16 +132,18 @@ export class ChatService {
       }
     }
 
+    // Query newest messages first
     const messages = await prisma.message.findMany({
       where,
       take: limit,
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
       include: {
         reactions: true,
       },
     });
 
-    return messages.map((m) => this.formatMessage(m));
+    // Reverse into chronological order (oldest to newest) for client display
+    return messages.reverse().map((m) => this.formatMessage(m));
   }
 
   /**

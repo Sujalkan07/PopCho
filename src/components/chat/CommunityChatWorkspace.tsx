@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { MediaItem, ChatMessage, CommunityChannel } from '../../services/tmdb/types';
-import { MOCK_MESSAGES, MOCK_CHANNELS } from '../../services/tmdb/mockData';
+import { MOCK_CHANNELS } from '../../services/tmdb/mockData';
 import {
   lookupCommunity,
   getMessages,
@@ -18,6 +18,8 @@ import {
   subscribeToPresence,
   emitSendMessage,
   emitToggleReaction,
+  subscribeToConnection,
+  isSocketConnected as checkSocketConnected,
 } from '../../services/community/socket';
 
 interface CommunityChatWorkspaceProps {
@@ -35,14 +37,18 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
   const [communityRecord, setCommunityRecord] = useState<CommunityRecord | null>(null);
   const [channels, setChannels] = useState<CommunityChannel[]>(MOCK_CHANNELS);
   const [activeChannelId, setActiveChannelId] = useState<string>(initialChannelId || MOCK_CHANNELS[0].id);
-  const [messages, setMessages] = useState<ChatMessage[]>(MOCK_MESSAGES);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(true);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
   const [isSpoilerMode, setIsSpoilerMode] = useState(false);
   const [unmaskedSpoilers, setUnmaskedSpoilers] = useState<Record<string, boolean>>({});
   const [userJoined, setUserJoined] = useState(false);
-  const [memberCount, setMemberCount] = useState<number>(show.communityMembersCount || 142800);
-  const [onlineCount, setOnlineCount] = useState<number>(show.activeOnlineCount || 12400);
-  const [isSocketConnected, setIsSocketConnected] = useState(true);
+  const [memberCount, setMemberCount] = useState<number>(show.communityMembersCount || 0);
+  const [onlineCount, setOnlineCount] = useState<number>(1);
+  const [isSocketConnected, setIsSocketConnected] = useState<boolean>(checkSocketConnected());
 
   // Watch party countdown state
   const [countdown, setCountdown] = useState({ days: 2, hours: 14, mins: 38, secs: 52 });
@@ -61,6 +67,14 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
   }, []);
 
   const chatStreamRef = useRef<HTMLDivElement>(null);
+
+  // Subscribe to live socket connection status
+  useEffect(() => {
+    const unsub = subscribeToConnection((connected) => {
+      setIsSocketConnected(connected);
+    });
+    return () => unsub();
+  }, []);
 
   // 1. Load community & channels from backend database
   useEffect(() => {
@@ -96,7 +110,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
         }
       })
       .catch((err) => {
-        console.warn('Backend community lookup fallback:', err);
+        console.warn('Backend community lookup error:', err);
       });
 
     return () => {
@@ -107,23 +121,23 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
   // 2. Load messages from database whenever active channel or community changes
   const loadChannelMessages = useCallback(async () => {
     if (!communityRecord?.id || !activeChannelId) return;
+    setIsLoadingMessages(true);
+    setMessagesError(null);
     try {
       const dbMessages = await getMessages(communityRecord.id, activeChannelId, 50);
-      if (dbMessages && dbMessages.length > 0) {
-        setMessages(dbMessages);
-      } else {
-        // If 0 messages in DB, use starter messages for Stranger Things or clean empty slate
-        const isStrangerThings = String(show.id).includes('stranger') || show.tmdbId === 66732;
-        setMessages(isStrangerThings ? MOCK_MESSAGES : []);
-      }
+      setMessages(dbMessages || []);
     } catch (err) {
       console.warn('Could not load channel messages from DB:', err);
+      setMessagesError('Failed to load message history from database.');
+    } finally {
+      setIsLoadingMessages(false);
     }
-  }, [communityRecord, activeChannelId, show.id, show.tmdbId]);
+  }, [communityRecord, activeChannelId]);
 
   useEffect(() => {
+    setMessages([]);
     loadChannelMessages();
-  }, [loadChannelMessages]);
+  }, [activeChannelId, loadChannelMessages]);
 
   // 3. Connect Socket.IO channel room for real-time messages & reactions
   useEffect(() => {
@@ -154,7 +168,6 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
     const unsubPres = subscribeToPresence((data) => {
       if (data.channelId === activeChannelId) {
         setOnlineCount(data.onlineCount);
-        setIsSocketConnected(true);
       }
     });
 
@@ -170,57 +183,93 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
     setUnmaskedSpoilers((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  // 4. Send message handler (Sockets with REST fallback)
+  // 4. Send message handler (Sockets with REST fallback & draft preservation on error)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = inputText.trim();
-    if (!trimmed) return;
+    if (!trimmed || isSending) return;
 
     const isSpoiler = isSpoilerMode || trimmed.startsWith('[SPOILER]');
     const cleanContent = trimmed.replace(/^\[SPOILER\]\s*/, '');
 
-    setInputText('');
-    setIsSpoilerMode(false);
+    setIsSending(true);
+    setSendError(null);
 
     try {
+      let savedMessage: ChatMessage | null = null;
+
       // Primary: Real-time Socket.IO emission
-      const socketRes = await emitSendMessage(activeChannelId, cleanContent, isSpoiler);
-      if (socketRes.success && socketRes.message) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === socketRes.message!.id)) return prev;
-          return [...prev, socketRes.message!];
-        });
+      if (isSocketConnected) {
+        const socketRes = await emitSendMessage(activeChannelId, cleanContent, isSpoiler);
+        if (socketRes.success && socketRes.message) {
+          savedMessage = socketRes.message;
+        } else {
+          throw new Error(socketRes.error || 'Real-time send error');
+        }
       } else if (communityRecord?.id) {
         // Fallback: REST API
         const restMsg = await sendMessage(communityRecord.id, activeChannelId, cleanContent, isSpoiler);
+        savedMessage = restMsg;
+      }
+
+      if (savedMessage) {
         setMessages((prev) => {
-          if (prev.some((m) => m.id === restMsg.id)) return prev;
-          return [...prev, restMsg];
+          if (prev.some((m) => m.id === savedMessage!.id)) return prev;
+          return [...prev, savedMessage!];
         });
+        // Clear input draft only after successful persistence
+        setInputText('');
+        setIsSpoilerMode(false);
       }
     } catch (err) {
       console.error('Failed to send message:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to send message';
+      setSendError(msg);
+      // Draft preserved in inputText
+    } finally {
+      setIsSending(false);
+      setTimeout(() => {
+        if (chatStreamRef.current) {
+          chatStreamRef.current.scrollTop = chatStreamRef.current.scrollHeight;
+        }
+      }, 100);
     }
-
-    setTimeout(() => {
-      if (chatStreamRef.current) {
-        chatStreamRef.current.scrollTop = chatStreamRef.current.scrollHeight;
-      }
-    }, 100);
   };
 
-  // 5. Add / Toggle reaction handler
+  // 5. Add / Toggle reaction handler with rollback on error
   const handleAddReaction = async (messageId: string, emoji: string) => {
+    const previousMessages = messages;
+
     // Optimistic local update
     setMessages((prev) =>
       prev.map((m) => {
         if (m.id !== messageId) return m;
         const existing = m.reactions.find((r) => r.emoji === emoji);
         if (existing) {
+          const userAlreadyReacted =
+            existing.users.includes('current-user') || existing.users.includes('user_fan_01');
+          if (userAlreadyReacted) {
+            const nextCount = Math.max(0, existing.count - 1);
+            return {
+              ...m,
+              reactions:
+                nextCount === 0
+                  ? m.reactions.filter((r) => r.emoji !== emoji)
+                  : m.reactions.map((r) =>
+                      r.emoji === emoji
+                        ? {
+                            ...r,
+                            count: nextCount,
+                            users: r.users.filter((u) => u !== 'current-user' && u !== 'user_fan_01'),
+                          }
+                        : r
+                    ),
+            };
+          }
           return {
             ...m,
             reactions: m.reactions.map((r) =>
-              r.emoji === emoji ? { ...r, count: r.count + 1 } : r
+              r.emoji === emoji ? { ...r, count: r.count + 1, users: [...r.users, 'current-user'] } : r
             ),
           };
         }
@@ -242,9 +291,12 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
         setMessages((prev) =>
           prev.map((m) => (m.id === messageId ? { ...m, reactions: restRes.reactions } : m))
         );
+      } else {
+        setMessages(previousMessages);
       }
     } catch (err) {
-      console.warn('Reaction update error:', err);
+      console.warn('Reaction update error, rolling back:', err);
+      setMessages(previousMessages);
     }
   };
 
@@ -307,11 +359,11 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                     <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
                       verified
                     </span>
-                    Official Hub • Verified by {(memberCount > 0 ? memberCount : show.communityMembersCount || 142800).toLocaleString()} Fans
+                    Official Hub • Verified Fandom {memberCount > 0 || show.communityMembersCount ? `• ${(memberCount > 0 ? memberCount : show.communityMembersCount!).toLocaleString()} Fans` : ''}
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#201f1f] text-[#e9bcb6] text-xs">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#70dc8e]" />
-                    {show.statusText || 'Active Season'}
+                    {show.statusText || 'Active Fandom'}
                   </span>
                 </div>
 
@@ -332,20 +384,26 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                     </span>
                   ))}
                   <span>•</span>
-                  <span>{show.numberOfSeasons || 4} Seasons ({show.numberOfEpisodes || 34} Episodes)</span>
+                  <span>
+                    {show.numberOfSeasons
+                      ? `${show.numberOfSeasons} Seasons (${show.numberOfEpisodes || 0} Episodes)`
+                      : show.mediaType === 'movie'
+                      ? 'Feature Film'
+                      : 'Series'}
+                  </span>
                 </div>
 
                 {/* Quick Stats Ribbon */}
                 <div className="flex flex-wrap items-center gap-4 sm:gap-6 pt-1 text-xs text-[#e9bcb6]">
                   <div className="flex items-center gap-1.5 text-[#e5e2e1]">
                     <span className="material-symbols-outlined text-[#e50914] text-base">groups</span>
-                    <strong>{(memberCount > 0 ? memberCount : show.communityMembersCount || 142800).toLocaleString()}</strong> Members
+                    <strong>{(memberCount > 0 ? memberCount : show.communityMembersCount || 0).toLocaleString()}</strong> Members
                   </div>
                   <div className="flex items-center gap-1.5 text-[#e5e2e1]">
                     <span className="material-symbols-outlined text-[#e50914] text-base" style={{ fontVariationSettings: "'FILL' 1" }}>
                       star
                     </span>
-                    <strong>{show.voteAverage.toFixed(1)}</strong> Rating
+                    <strong>{show.voteAverage ? show.voteAverage.toFixed(1) : 'NR'}</strong> Rating
                   </div>
                   <div className="flex items-center gap-1.5 text-[#e5e2e1]">
                     <span className="material-symbols-outlined text-[#70dc8e] text-base">forum</span>
@@ -523,6 +581,40 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                 </div>
               </div>
 
+              {/* Loading State */}
+              {isLoadingMessages && (
+                <div className="flex flex-col items-center justify-center py-16 text-[#e9bcb6]/70 gap-3">
+                  <div className="w-7 h-7 rounded-full border-2 border-[#e50914] border-t-transparent animate-spin" />
+                  <span className="text-xs font-medium">Synchronizing channel messages...</span>
+                </div>
+              )}
+
+              {/* Error State */}
+              {messagesError && !isLoadingMessages && (
+                <div className="p-4 rounded-xl bg-[#2a1a1a] border border-[#e50914]/40 flex items-center justify-between text-xs text-[#ffdad6] my-4">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[#e50914] text-base">error</span>
+                    <span>{messagesError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => loadChannelMessages()}
+                    className="px-3 py-1 rounded-lg bg-[#e50914] text-white font-bold hover:bg-[#b2000d]"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {!isLoadingMessages && !messagesError && messages.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-16 text-center text-[#e9bcb6]/70 gap-2">
+                  <span className="material-symbols-outlined text-4xl text-[#353534]">forum</span>
+                  <h3 className="text-sm font-bold text-[#e5e2e1]">#{activeChannel.name} is quiet</h3>
+                  <p className="text-xs max-w-sm">No discussions have started here yet. Be the first fan to post a theory or breakdown!</p>
+                </div>
+              )}
+
               {/* Messages Feed */}
               {messages.map((msg) => {
                 const isSpoilerMasked = msg.isSpoiler && !unmaskedSpoilers[msg.id];
@@ -627,9 +719,9 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
             {/* Persistent Message Composer Bar */}
             <div className="p-3 sm:p-4 bg-[#2a2a2a] border-t border-[#353534]">
               <div className="flex items-center justify-between pb-2 text-[11px] text-[#e9bcb6]/70">
-                <span className="flex items-center gap-1 text-[#70dc8e]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#70dc8e] animate-pulse" />
-                  Channel live (312 fans online)
+                <span className={`flex items-center gap-1.5 ${isSocketConnected ? 'text-[#70dc8e]' : 'text-[#ffb4aa]'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${isSocketConnected ? 'bg-[#70dc8e] animate-pulse' : 'bg-[#e50914]'}`} />
+                  {isSocketConnected ? 'Channel connected' : 'Connecting live sync...'} ({onlineCount > 0 ? onlineCount : 1} active {onlineCount === 1 ? 'fan' : 'fans'})
                 </span>
                 {isSpoilerMode && (
                   <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#e50914] text-white font-bold">
@@ -638,6 +730,18 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                   </span>
                 )}
               </div>
+
+              {sendError && (
+                <div className="mb-2 px-3 py-1.5 rounded-lg bg-[#2a1a1a] border border-[#e50914]/40 text-[#ffdad6] text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-sm text-[#e50914]">error</span>
+                    <span>{sendError}</span>
+                  </div>
+                  <button type="button" onClick={() => setSendError(null)} className="text-[#ffb4ab] text-xs hover:underline">
+                    Dismiss
+                  </button>
+                </div>
+              )}
 
               <form onSubmit={handleSendMessage} className="flex flex-col gap-2 bg-[#0e0e0e] rounded-xl p-2 border border-[#353534] focus-within:border-[#e50914]">
                 <textarea
@@ -680,9 +784,14 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
 
                   <button
                     type="submit"
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white text-xs font-bold transition-all shadow-md active:scale-95"
+                    disabled={isSending || !inputText.trim()}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-white text-xs font-bold transition-all shadow-md active:scale-95 ${
+                      isSending || !inputText.trim()
+                        ? 'bg-[#353534] text-[#e9bcb6]/50 cursor-not-allowed'
+                        : 'bg-[#e50914] hover:bg-[#b2000d]'
+                    }`}
                   >
-                    <span>Send</span>
+                    <span>{isSending ? 'Sending...' : 'Send'}</span>
                     <span className="material-symbols-outlined text-sm">send</span>
                   </button>
                 </div>
@@ -776,7 +885,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                 <div className="flex items-center gap-2">
                   <h4 className="text-sm font-bold text-[#e5e2e1]">Online Members</h4>
                   <span className="px-2 py-0.5 rounded-full bg-[#70dc8e]/20 text-[#70dc8e] text-xs font-bold">
-                    {onlineCount > 0 ? onlineCount.toLocaleString() : (show.activeOnlineCount?.toLocaleString() || '1,248')}
+                    {onlineCount > 0 ? onlineCount.toLocaleString() : (show.activeOnlineCount ? show.activeOnlineCount.toLocaleString() : '1')}
                   </span>
                 </div>
                 <span className="material-symbols-outlined text-sm text-[#e9bcb6]/70">filter_list</span>

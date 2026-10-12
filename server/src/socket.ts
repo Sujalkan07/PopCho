@@ -45,22 +45,41 @@ export function initSocketServer(httpServer: HttpServer, allowedOrigins: string[
     console.log(`[Socket.IO] Client connected: ${socket.id} (user: ${user.name} [${user.id}])`);
 
     /**
-     * Join channel room
+     * Join channel room with database validation
      */
-    socket.on('join_channel', async ({ channelId }: { channelId: string }) => {
-      if (!channelId) return;
-      const room = `channel:${channelId}`;
-      socket.join(room);
+    socket.on(
+      'join_channel',
+      async (
+        { channelId }: { channelId: string },
+        callback?: (res: { success: boolean; error?: string }) => void
+      ) => {
+        if (!channelId) {
+          callback?.({ success: false, error: 'channelId is required' });
+          return;
+        }
 
-      // Count clients in room for presence
-      const roomClients = io.sockets.adapter.rooms.get(room);
-      const onlineCount = roomClients ? roomClients.size : 1;
+        // Validate channel exists in PostgreSQL
+        const channel = await chatService.getChannelById(channelId);
+        if (!channel) {
+          callback?.({ success: false, error: 'Channel not found' });
+          return;
+        }
 
-      io.to(room).emit('presence_update', {
-        channelId,
-        onlineCount,
-      });
-    });
+        const room = `channel:${channelId}`;
+        socket.join(room);
+
+        // Count clients in room for presence
+        const roomClients = io.sockets.adapter.rooms.get(room);
+        const onlineCount = roomClients ? roomClients.size : 1;
+
+        io.to(room).emit('presence_update', {
+          channelId,
+          onlineCount,
+        });
+
+        callback?.({ success: true });
+      }
+    );
 
     /**
      * Leave channel room
@@ -110,9 +129,9 @@ export function initSocketServer(httpServer: HttpServer, allowedOrigins: string[
             userRole: user.role,
           });
 
-          // Broadcast to everyone in channel room (including sender)
+          // Broadcast to other clients in channel room (sender receives via callback)
           const room = `channel:${channelId}`;
-          io.to(room).emit('new_message', { message });
+          socket.to(room).emit('new_message', { message });
 
           callback?.({ success: true, message });
         } catch (err: unknown) {
@@ -182,6 +201,20 @@ export function initSocketServer(httpServer: HttpServer, allowedOrigins: string[
         channelId,
         user: { id: user.id, name: user.name },
       });
+    });
+
+    socket.on('disconnecting', () => {
+      for (const room of socket.rooms) {
+        if (room.startsWith('channel:')) {
+          const channelId = room.replace('channel:', '');
+          const roomClients = io.sockets.adapter.rooms.get(room);
+          const onlineCount = roomClients ? Math.max(0, roomClients.size - 1) : 0;
+          socket.to(room).emit('presence_update', {
+            channelId,
+            onlineCount,
+          });
+        }
+      }
     });
 
     socket.on('disconnect', () => {

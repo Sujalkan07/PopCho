@@ -158,9 +158,15 @@ router.get('/:communityId/channels', async (req: Request, res: Response) => {
  */
 router.get('/:communityId/channels/:channelId/messages', async (req: Request, res: Response) => {
   try {
+    const communityId = req.params.communityId as string;
     const channelId = req.params.channelId as string;
     const limit = Number(req.query.limit) || 50;
     const before = req.query.before as string | undefined;
+
+    const isChannelValid = await chatService.verifyChannelInCommunity(communityId, channelId);
+    if (!isChannelValid) {
+      return res.status(404).json({ error: 'Channel does not belong to the specified community' });
+    }
 
     const messages = await chatService.getChannelMessages(channelId, { limit, before });
     res.json({ messages });
@@ -176,12 +182,18 @@ router.get('/:communityId/channels/:channelId/messages', async (req: Request, re
  */
 router.post('/:communityId/channels/:channelId/messages', async (req: Request, res: Response) => {
   try {
+    const communityId = req.params.communityId as string;
     const channelId = req.params.channelId as string;
     const { content, isSpoiler } = req.body;
     const user = req.user!;
 
     if (!content || !content.trim()) {
       return res.status(400).json({ error: 'Message content cannot be empty' });
+    }
+
+    const isChannelValid = await chatService.verifyChannelInCommunity(communityId, channelId);
+    if (!isChannelValid) {
+      return res.status(404).json({ error: 'Channel does not belong to the specified community' });
     }
 
     const message = await chatService.createMessage({
@@ -209,12 +221,19 @@ router.post(
   '/:communityId/channels/:channelId/messages/:messageId/reactions',
   async (req: Request, res: Response) => {
     try {
+      const communityId = req.params.communityId as string;
+      const channelId = req.params.channelId as string;
       const messageId = req.params.messageId as string;
       const { emoji } = req.body;
       const userId = req.user!.id;
 
-      if (!emoji) {
+      if (!emoji || !emoji.trim()) {
         return res.status(400).json({ error: 'Emoji is required' });
+      }
+
+      const isChannelValid = await chatService.verifyChannelInCommunity(communityId, channelId);
+      if (!isChannelValid) {
+        return res.status(404).json({ error: 'Channel does not belong to the specified community' });
       }
 
       const result = await chatService.toggleReaction({

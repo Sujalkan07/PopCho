@@ -47,11 +47,11 @@ export const JoinHubModal: React.FC<JoinHubModalProps> = ({
 
   if (!isOpen || !show) return null;
 
-  const currentMembers = memberCount ?? show.communityMembersCount ?? 45000;
+  const currentMembers = memberCount ?? show.communityMembersCount ?? 0;
   const onlineFormatted =
     show.activeOnlineCount && show.activeOnlineCount >= 1000
       ? `${(show.activeOnlineCount / 1000).toFixed(1)}k`
-      : `${show.activeOnlineCount || 1200}`;
+      : `${show.activeOnlineCount || 1}`;
   const membersFormatted =
     currentMembers >= 1000
       ? `${(currentMembers / 1000).toFixed(1)}k`
@@ -96,8 +96,8 @@ export const JoinHubModal: React.FC<JoinHubModalProps> = ({
         {/* Channels & Info Section */}
         <div className="p-5 sm:p-6 flex flex-col gap-5">
           <div className="flex items-center justify-between text-xs text-[#e9bcb6]/80 pb-2 border-b border-[#353534]">
-            <span>{membersFormatted} Active Fans</span>
-            <span>{show.channelsCount || 36} Channels Available</span>
+            <span>{currentMembers > 0 ? `${membersFormatted} Active Fans` : 'Active Fan Hub'}</span>
+            <span>{channels.length} Channels Available</span>
             <span className="text-[#e50914] font-semibold">Spoiler Safe Rooms Included</span>
           </div>
 

@@ -40,6 +40,28 @@ export function getCommunitySocket(): Socket {
   return socket;
 }
 
+export function isSocketConnected(): boolean {
+  return socket ? socket.connected : false;
+}
+
+export function subscribeToConnection(callback: (connected: boolean) => void): () => void {
+  const s = getCommunitySocket();
+  callback(s.connected);
+
+  const onConnect = () => callback(true);
+  const onDisconnect = () => callback(false);
+
+  s.on('connect', onConnect);
+  s.on('disconnect', onDisconnect);
+  s.on('connect_error', onDisconnect);
+
+  return () => {
+    s.off('connect', onConnect);
+    s.off('disconnect', onDisconnect);
+    s.off('connect_error', onDisconnect);
+  };
+}
+
 export function joinChannelRoom(channelId: string): void {
   const s = getCommunitySocket();
   if (s.connected) {
