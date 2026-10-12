@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { MediaItem } from '../../services/tmdb/types';
 import { MOCK_CHANNELS } from '../../services/tmdb/mockData';
+import { lookupCommunity, type ChannelRecord } from '../../services/community/api';
 
 interface JoinHubModalProps {
   isOpen: boolean;
@@ -15,16 +16,46 @@ export const JoinHubModal: React.FC<JoinHubModalProps> = ({
   show,
   onEnterCommunityChat,
 }) => {
+  const [channels, setChannels] = useState<Array<ChannelRecord | typeof MOCK_CHANNELS[0]>>(MOCK_CHANNELS);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !show) return;
+    let isMounted = true;
+    lookupCommunity(show)
+      .then((data) => {
+        if (!isMounted) return;
+        const comm = data.community;
+        if (comm.channels && comm.channels.length > 0) {
+          setChannels(comm.channels);
+        } else {
+          setChannels(MOCK_CHANNELS);
+        }
+        if (typeof comm.memberCount === 'number') {
+          setMemberCount(comm.memberCount);
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to load community details for modal:', err);
+        setChannels(MOCK_CHANNELS);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, show]);
+
   if (!isOpen || !show) return null;
 
+  const currentMembers = memberCount ?? show.communityMembersCount ?? 45000;
   const onlineFormatted =
     show.activeOnlineCount && show.activeOnlineCount >= 1000
       ? `${(show.activeOnlineCount / 1000).toFixed(1)}k`
       : `${show.activeOnlineCount || 1200}`;
   const membersFormatted =
-    show.communityMembersCount && show.communityMembersCount >= 1000
-      ? `${(show.communityMembersCount / 1000).toFixed(1)}k`
-      : `${show.communityMembersCount || 45000}`;
+    currentMembers >= 1000
+      ? `${(currentMembers / 1000).toFixed(1)}k`
+      : `${currentMembers}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fadeIn">
@@ -75,7 +106,7 @@ export const JoinHubModal: React.FC<JoinHubModalProps> = ({
               Select Channel to Join
             </h4>
             <div className="space-y-2">
-              {MOCK_CHANNELS.map((ch) => (
+              {channels.map((ch) => (
                 <div
                   key={ch.id}
                   onClick={() => onEnterCommunityChat?.(show, ch.id)}
@@ -96,7 +127,9 @@ export const JoinHubModal: React.FC<JoinHubModalProps> = ({
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-[#e9bcb6]/70 line-clamp-1">{ch.topic}</p>
+                      <p className="text-xs text-[#e9bcb6]/70 line-clamp-1">
+                        {'topic' in ch ? ch.topic : (ch.description || 'Fan discussions & real-time chat')}
+                      </p>
                     </div>
                   </div>
 
@@ -119,7 +152,7 @@ export const JoinHubModal: React.FC<JoinHubModalProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => onEnterCommunityChat?.(show, MOCK_CHANNELS[0].id)}
+              onClick={() => onEnterCommunityChat?.(show, channels[0]?.id || 'channel_theories')}
               className="px-5 py-2.5 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
             >
               <span className="material-symbols-outlined text-base">login</span>

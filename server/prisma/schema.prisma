@@ -1,0 +1,87 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Community {
+  id          String       @id @default(cuid())
+  tmdbId      Int
+  mediaType   String
+  title       String
+  slug        String       @unique
+  description String?      @db.Text
+  posterPath  String?
+  backdropPath String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  memberships Membership[]
+  channels    Channel[]
+
+  @@unique([tmdbId, mediaType])
+  @@index([title])
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  communityId String
+  userId      String
+  role        String    @default("MEMBER")
+  joinedAt    DateTime  @default(now())
+
+  community  Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([userId])
+}
+
+model Channel {
+  id          String    @id @default(cuid())
+  communityId String
+  name        String
+  slug        String
+  description String?
+  type        String    @default("TEXT")
+  createdAt   DateTime  @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([communityId, slug])
+  @@index([communityId])
+}
+
+model Message {
+  id        String     @id @default(cuid())
+  channelId String
+  userId    String
+  content   String     @db.Text
+  isSpoiler Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  reactions Reaction[]
+
+  @@index([channelId, createdAt])
+  @@index([userId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}

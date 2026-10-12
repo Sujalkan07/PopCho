@@ -1,6 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
-import type { MediaItem, ChatMessage } from '../../services/tmdb/types';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import type { MediaItem, ChatMessage, CommunityChannel } from '../../services/tmdb/types';
 import { MOCK_MESSAGES, MOCK_CHANNELS } from '../../services/tmdb/mockData';
+import {
+  lookupCommunity,
+  getMessages,
+  sendMessage,
+  toggleReaction,
+  joinCommunity,
+  leaveCommunity,
+  type CommunityRecord,
+} from '../../services/community/api';
+import {
+  joinChannelRoom,
+  leaveChannelRoom,
+  subscribeToMessages,
+  subscribeToReactions,
+  subscribeToPresence,
+  emitSendMessage,
+  emitToggleReaction,
+} from '../../services/community/socket';
 
 interface CommunityChatWorkspaceProps {
   show: MediaItem;
@@ -10,16 +28,21 @@ interface CommunityChatWorkspaceProps {
 
 export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
   show,
-  initialChannelId = 'upside-down-theories',
+  initialChannelId,
   onBackToDashboard,
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'chat' | 'theories' | 'reviews'>('chat');
-  const [activeChannelId, setActiveChannelId] = useState(initialChannelId);
+  const [communityRecord, setCommunityRecord] = useState<CommunityRecord | null>(null);
+  const [channels, setChannels] = useState<CommunityChannel[]>(MOCK_CHANNELS);
+  const [activeChannelId, setActiveChannelId] = useState<string>(initialChannelId || MOCK_CHANNELS[0].id);
   const [messages, setMessages] = useState<ChatMessage[]>(MOCK_MESSAGES);
   const [inputText, setInputText] = useState('');
   const [isSpoilerMode, setIsSpoilerMode] = useState(false);
   const [unmaskedSpoilers, setUnmaskedSpoilers] = useState<Record<string, boolean>>({});
-  const [userJoined, setUserJoined] = useState(true);
+  const [userJoined, setUserJoined] = useState(false);
+  const [memberCount, setMemberCount] = useState<number>(show.communityMembersCount || 142800);
+  const [onlineCount, setOnlineCount] = useState<number>(show.activeOnlineCount || 12400);
+  const [isSocketConnected, setIsSocketConnected] = useState(true);
 
   // Watch party countdown state
   const [countdown, setCountdown] = useState({ days: 2, hours: 14, mins: 38, secs: 52 });
@@ -39,11 +62,116 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
 
   const chatStreamRef = useRef<HTMLDivElement>(null);
 
+  // 1. Load community & channels from backend database
+  useEffect(() => {
+    let isMounted = true;
+    lookupCommunity(show)
+      .then((res) => {
+        if (!isMounted) return;
+        setCommunityRecord(res.community);
+        setUserJoined(res.isMember);
+        if (typeof res.community.memberCount === 'number') {
+          setMemberCount(res.community.memberCount);
+        }
+
+        if (res.community.channels && res.community.channels.length > 0) {
+          const mappedChannels: CommunityChannel[] = res.community.channels.map((c) => ({
+            id: c.id,
+            communityId: c.communityId,
+            name: c.name,
+            topic: c.description || `#${c.name} discussion`,
+            isSpoilerSafe: Boolean(c.isSpoilerSafe),
+          }));
+          setChannels(mappedChannels);
+
+          // Select matching channel or first channel
+          const found = mappedChannels.find(
+            (ch) => ch.id === initialChannelId || ch.name === initialChannelId
+          );
+          if (found) {
+            setActiveChannelId(found.id);
+          } else if (mappedChannels.length > 0) {
+            setActiveChannelId(mappedChannels[0].id);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('Backend community lookup fallback:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [show, initialChannelId]);
+
+  // 2. Load messages from database whenever active channel or community changes
+  const loadChannelMessages = useCallback(async () => {
+    if (!communityRecord?.id || !activeChannelId) return;
+    try {
+      const dbMessages = await getMessages(communityRecord.id, activeChannelId, 50);
+      if (dbMessages && dbMessages.length > 0) {
+        setMessages(dbMessages);
+      } else {
+        // If 0 messages in DB, use starter messages for Stranger Things or clean empty slate
+        const isStrangerThings = String(show.id).includes('stranger') || show.tmdbId === 66732;
+        setMessages(isStrangerThings ? MOCK_MESSAGES : []);
+      }
+    } catch (err) {
+      console.warn('Could not load channel messages from DB:', err);
+    }
+  }, [communityRecord, activeChannelId, show.id, show.tmdbId]);
+
+  useEffect(() => {
+    loadChannelMessages();
+  }, [loadChannelMessages]);
+
+  // 3. Connect Socket.IO channel room for real-time messages & reactions
+  useEffect(() => {
+    if (!activeChannelId) return;
+
+    joinChannelRoom(activeChannelId);
+
+    const unsubMsg = subscribeToMessages((incoming) => {
+      if (incoming.channelId === activeChannelId) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === incoming.id)) return prev;
+          return [...prev, incoming];
+        });
+        setTimeout(() => {
+          if (chatStreamRef.current) {
+            chatStreamRef.current.scrollTop = chatStreamRef.current.scrollHeight;
+          }
+        }, 50);
+      }
+    });
+
+    const unsubReact = subscribeToReactions((data) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === data.messageId ? { ...m, reactions: data.reactions } : m))
+      );
+    });
+
+    const unsubPres = subscribeToPresence((data) => {
+      if (data.channelId === activeChannelId) {
+        setOnlineCount(data.onlineCount);
+        setIsSocketConnected(true);
+      }
+    });
+
+    return () => {
+      leaveChannelRoom(activeChannelId);
+      unsubMsg();
+      unsubReact();
+      unsubPres();
+    };
+  }, [activeChannelId]);
+
   const toggleSpoilerMask = (id: string) => {
     setUnmaskedSpoilers((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  // 4. Send message handler (Sockets with REST fallback)
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = inputText.trim();
     if (!trimmed) return;
@@ -51,23 +179,28 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
     const isSpoiler = isSpoilerMode || trimmed.startsWith('[SPOILER]');
     const cleanContent = trimmed.replace(/^\[SPOILER\]\s*/, '');
 
-    const newMsg: ChatMessage = {
-      id: `user-msg-${Date.now()}`,
-      channelId: activeChannelId,
-      userId: 'current-user',
-      userName: 'You',
-      userAvatar:
-        'https://lh3.googleusercontent.com/aida-public/AB6AXuBmNfypXexpUqGV6ruN3XC8n2OqYyfzM-rHCYQH9eIHwRrMERZmMPSMVhkWDh7lAeFDaMoIKQEcn8pdfMMGDKqiI4PsbTQxIEly40c9OC_7jeis6uUX0Xmau1lUS3kAo7bw8bA67k1U1vhNTC8RwMbUTFVgQAOvm-N4cKCenSDe7FIT_9PVezInr_GDwS61-H7-0B_F9PO1zaeOr3XWdla-rkuVL8j2MXny0EU59iaaB5L157FxLwbvqw',
-      userRole: 'Community Member',
-      content: cleanContent,
-      isSpoiler,
-      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      reactions: [],
-    };
-
-    setMessages((prev) => [...prev, newMsg]);
     setInputText('');
     setIsSpoilerMode(false);
+
+    try {
+      // Primary: Real-time Socket.IO emission
+      const socketRes = await emitSendMessage(activeChannelId, cleanContent, isSpoiler);
+      if (socketRes.success && socketRes.message) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === socketRes.message!.id)) return prev;
+          return [...prev, socketRes.message!];
+        });
+      } else if (communityRecord?.id) {
+        // Fallback: REST API
+        const restMsg = await sendMessage(communityRecord.id, activeChannelId, cleanContent, isSpoiler);
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === restMsg.id)) return prev;
+          return [...prev, restMsg];
+        });
+      }
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    }
 
     setTimeout(() => {
       if (chatStreamRef.current) {
@@ -76,7 +209,9 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
     }, 100);
   };
 
-  const handleAddReaction = (messageId: string, emoji: string) => {
+  // 5. Add / Toggle reaction handler
+  const handleAddReaction = async (messageId: string, emoji: string) => {
+    // Optimistic local update
     setMessages((prev) =>
       prev.map((m) => {
         if (m.id !== messageId) return m;
@@ -95,9 +230,43 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
         };
       })
     );
+
+    try {
+      const socketRes = await emitToggleReaction(messageId, activeChannelId, emoji);
+      if (socketRes.success && socketRes.reactions) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, reactions: socketRes.reactions! } : m))
+        );
+      } else if (communityRecord?.id) {
+        const restRes = await toggleReaction(communityRecord.id, activeChannelId, messageId, emoji);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, reactions: restRes.reactions } : m))
+        );
+      }
+    } catch (err) {
+      console.warn('Reaction update error:', err);
+    }
   };
 
-  const activeChannel = MOCK_CHANNELS.find((c) => c.id === activeChannelId) || MOCK_CHANNELS[0];
+  // 6. Join / Leave Community handler
+  const handleToggleJoin = async () => {
+    if (!communityRecord?.id) return;
+    try {
+      if (!userJoined) {
+        const res = await joinCommunity(communityRecord.id);
+        setUserJoined(true);
+        setMemberCount(res.memberCount);
+      } else {
+        const res = await leaveCommunity(communityRecord.id);
+        setUserJoined(false);
+        setMemberCount(res.memberCount);
+      }
+    } catch (err) {
+      console.error('Failed to toggle community membership:', err);
+    }
+  };
+
+  const activeChannel = channels.find((c) => c.id === activeChannelId) || channels[0] || MOCK_CHANNELS[0];
 
   return (
     <div className="w-full min-h-screen bg-[#131313] text-[#e5e2e1] flex flex-col animate-fadeIn">
@@ -111,9 +280,9 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
           <span className="material-symbols-outlined text-base">arrow_back</span>
           <span>Back to All Show Hubs</span>
         </button>
-        <span className="text-xs text-[#70dc8e] flex items-center gap-1.5 font-medium">
-          <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse" />
-          Live Real-time Socket Synchronized
+        <span className={`text-xs flex items-center gap-1.5 font-medium ${isSocketConnected ? 'text-[#70dc8e]' : 'text-[#ffb4aa]'}`}>
+          <span className={`w-2 h-2 rounded-full ${isSocketConnected ? 'bg-[#70dc8e] animate-pulse' : 'bg-[#e50914]'}`} />
+          {isSocketConnected ? 'Live Real-time Socket Synchronized' : 'Connecting to Live Sync...'}
         </span>
       </div>
 
@@ -138,7 +307,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                     <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
                       verified
                     </span>
-                    Official Hub • Verified by {show.communityMembersCount?.toLocaleString() || '142,800'} Fans
+                    Official Hub • Verified by {(memberCount > 0 ? memberCount : show.communityMembersCount || 142800).toLocaleString()} Fans
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#201f1f] text-[#e9bcb6] text-xs">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#70dc8e]" />
@@ -170,7 +339,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                 <div className="flex flex-wrap items-center gap-4 sm:gap-6 pt-1 text-xs text-[#e9bcb6]">
                   <div className="flex items-center gap-1.5 text-[#e5e2e1]">
                     <span className="material-symbols-outlined text-[#e50914] text-base">groups</span>
-                    <strong>{show.communityMembersCount?.toLocaleString() || '142,800'}</strong> Members
+                    <strong>{(memberCount > 0 ? memberCount : show.communityMembersCount || 142800).toLocaleString()}</strong> Members
                   </div>
                   <div className="flex items-center gap-1.5 text-[#e5e2e1]">
                     <span className="material-symbols-outlined text-[#e50914] text-base" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -180,7 +349,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                   </div>
                   <div className="flex items-center gap-1.5 text-[#e5e2e1]">
                     <span className="material-symbols-outlined text-[#70dc8e] text-base">forum</span>
-                    <strong className="text-[#70dc8e]">{show.channelsCount || 54} Active</strong> Channels
+                    <strong className="text-[#70dc8e]">{channels.length > 0 ? channels.length : (show.channelsCount || 4)} Active</strong> Channels
                   </div>
                 </div>
               </div>
@@ -189,7 +358,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
               <div className="flex items-center gap-2.5 flex-shrink-0">
                 <button
                   type="button"
-                  onClick={() => setUserJoined(!userJoined)}
+                  onClick={handleToggleJoin}
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-md ${
                     userJoined
                       ? 'bg-[#2a2a2a] text-[#70dc8e] border border-[#70dc8e]/40'
@@ -281,7 +450,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                 onChange={(e) => setActiveChannelId(e.target.value)}
                 className="bg-[#201f1f] text-[#e5e2e1] text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#353534] focus:outline-none cursor-pointer"
               >
-                {MOCK_CHANNELS.map((ch) => (
+                {channels.map((ch) => (
                   <option key={ch.id} value={ch.id}>
                     #{ch.name}
                   </option>
@@ -607,7 +776,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                 <div className="flex items-center gap-2">
                   <h4 className="text-sm font-bold text-[#e5e2e1]">Online Members</h4>
                   <span className="px-2 py-0.5 rounded-full bg-[#70dc8e]/20 text-[#70dc8e] text-xs font-bold">
-                    1,248
+                    {onlineCount > 0 ? onlineCount.toLocaleString() : (show.activeOnlineCount?.toLocaleString() || '1,248')}
                   </span>
                 </div>
                 <span className="material-symbols-outlined text-sm text-[#e9bcb6]/70">filter_list</span>

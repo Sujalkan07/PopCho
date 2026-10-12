@@ -6,6 +6,7 @@ interface ShowCardProps {
   show: MediaItem;
   viewMode?: 'grid' | 'list';
   isBookmarked?: boolean;
+  isMember?: boolean;
   onToggleBookmark?: (showId: string | number) => void;
   onJoinHub?: (show: MediaItem) => void;
   onViewReviews?: (show: MediaItem) => void;
@@ -15,6 +16,7 @@ export const ShowCard: React.FC<ShowCardProps> = ({
   show,
   viewMode = 'grid',
   isBookmarked = false,
+  isMember = false,
   onToggleBookmark,
   onJoinHub,
   onViewReviews,
@@ -114,10 +116,16 @@ export const ShowCard: React.FC<ShowCardProps> = ({
             <button
               type="button"
               onClick={() => onJoinHub?.(show)}
-              className="py-2.5 px-5 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white text-xs sm:text-sm font-bold transition-all shadow-md flex items-center justify-center gap-1.5 active:scale-95"
+              className={`py-2.5 px-5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-md flex items-center justify-center gap-1.5 active:scale-95 ${
+                isMember
+                  ? 'bg-[#2a2a2a] text-[#70dc8e] border border-[#70dc8e]/40 hover:bg-[#353534]'
+                  : 'bg-[#e50914] hover:bg-[#b2000d] text-white'
+              }`}
             >
-              <span className="material-symbols-outlined text-base">forum</span>
-              <span>Join Hub</span>
+              <span className="material-symbols-outlined text-base">
+                {isMember ? 'check_circle' : 'forum'}
+              </span>
+              <span>{isMember ? 'Joined Hub' : 'Join Hub'}</span>
             </button>
             <button
               type="button"
@@ -271,10 +279,16 @@ export const ShowCard: React.FC<ShowCardProps> = ({
             <button
               type="button"
               onClick={() => onJoinHub?.(show)}
-              className="w-full py-2 px-3 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white text-xs font-bold text-center transition-all flex items-center justify-center gap-1 shadow-md active:scale-95"
+              className={`w-full py-2 px-3 rounded-xl font-bold text-xs text-center transition-all flex items-center justify-center gap-1 shadow-md active:scale-95 ${
+                isMember
+                  ? 'bg-[#2a2a2a] text-[#70dc8e] border border-[#70dc8e]/40 hover:bg-[#353534]'
+                  : 'bg-[#e50914] hover:bg-[#b2000d] text-white'
+              }`}
             >
-              <span className="material-symbols-outlined text-base">forum</span>
-              <span>Join Hub</span>
+              <span className="material-symbols-outlined text-base">
+                {isMember ? 'check_circle' : 'forum'}
+              </span>
+              <span>{isMember ? 'Joined' : 'Join Hub'}</span>
             </button>
             <button
               type="button"

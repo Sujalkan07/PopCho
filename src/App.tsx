@@ -31,6 +31,7 @@ export function AppContent() {
   const [selectedReviewShow, setSelectedReviewShow] = useState<MediaItem | null>(null);
   const [selectedJoinShow, setSelectedJoinShow] = useState<MediaItem | null>(null);
   const [activeWorkspaceShow, setActiveWorkspaceShow] = useState<MediaItem | null>(null);
+  const [activeWorkspaceChannelId, setActiveWorkspaceChannelId] = useState<string | undefined>(undefined);
 
   // Toggle bookmark handler
   const handleToggleBookmark = (showId: string | number) => {
@@ -65,7 +66,11 @@ export function AppContent() {
         <main className="pt-[108px] lg:pt-[68px]">
           <CommunityChatWorkspace
             show={activeWorkspaceShow}
-            onBackToDashboard={() => setActiveWorkspaceShow(null)}
+            initialChannelId={activeWorkspaceChannelId}
+            onBackToDashboard={() => {
+              setActiveWorkspaceShow(null);
+              setActiveWorkspaceChannelId(undefined);
+            }}
           />
         </main>
         <Footer />
@@ -185,9 +190,10 @@ export function AppContent() {
         isOpen={Boolean(selectedJoinShow)}
         onClose={() => setSelectedJoinShow(null)}
         show={selectedJoinShow}
-        onEnterCommunityChat={(show) => {
+        onEnterCommunityChat={(show, channelId) => {
           setSelectedJoinShow(null);
           setActiveWorkspaceShow(show);
+          setActiveWorkspaceChannelId(channelId);
         }}
       />
     </div>

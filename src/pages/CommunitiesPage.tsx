@@ -6,6 +6,7 @@ import { searchMedia } from '../services/tmdb/search';
 import { ShowCard } from '../components/directory/ShowCard';
 import { GENRE_FILTERS } from '../components/directory/DirectoryControls';
 import { MOCK_SHOWS } from '../services/tmdb/mockData';
+import { listCommunities, type CommunityRecord } from '../services/community/api';
 
 interface CommunitiesPageProps {
   bookmarkedIds: Record<string | number, boolean>;
@@ -44,6 +45,29 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
   // Search results state
   const [searchResults, setSearchResults] = useState<MediaItem[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Persistent database communities state
+  const [dbCommunities, setDbCommunities] = useState<Record<string, CommunityRecord>>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    listCommunities({ limit: 100 })
+      .then((res) => {
+        if (!isMounted) return;
+        const map: Record<string, CommunityRecord> = {};
+        for (const c of res.results) {
+          map[`${c.mediaType}-${c.tmdbId}`] = c;
+        }
+        setDbCommunities(map);
+      })
+      .catch((err) => {
+        console.warn('Could not load database communities:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Initial load: fetch trending & popular TV + Movies and merge with flagship Stitch communities
   const loadInitialCatalog = useCallback(async () => {
@@ -628,12 +652,22 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
             >
               {displayedItems.map((show) => {
                 const key = `${show.mediaType}-${show.tmdbId || show.id}`;
+                const dbRecord = dbCommunities[key];
+                const enrichedShow: MediaItem = dbRecord
+                  ? {
+                      ...show,
+                      communityMembersCount: dbRecord.memberCount || show.communityMembersCount,
+                      channelsCount: dbRecord.channelCount || show.channelsCount,
+                    }
+                  : show;
+
                 return (
                   <ShowCard
                     key={key}
-                    show={show}
+                    show={enrichedShow}
                     viewMode={viewMode}
                     isBookmarked={Boolean(bookmarkedIds[show.id])}
+                    isMember={Boolean(dbRecord?.isMember)}
                     onToggleBookmark={onToggleBookmark}
                     onJoinHub={onJoinHub}
                     onViewReviews={onViewReviews}
