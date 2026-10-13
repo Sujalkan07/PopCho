@@ -4,7 +4,8 @@ import { DEFAULT_POSTER } from '../../services/tmdb/client';
 
 interface ShowCardProps {
   show: MediaItem;
-  viewMode?: 'grid' | 'list';
+  viewMode?: 'grid' | 'list' | 'carousel';
+  rank?: number;
   isBookmarked?: boolean;
   isMember?: boolean;
   onToggleBookmark?: (showId: string | number) => void;
@@ -15,6 +16,7 @@ interface ShowCardProps {
 export const ShowCard: React.FC<ShowCardProps> = ({
   show,
   viewMode = 'grid',
+  rank,
   isBookmarked = false,
   isMember = false,
   onToggleBookmark,
@@ -33,6 +35,157 @@ export const ShowCard: React.FC<ShowCardProps> = ({
       : `${show.communityMembersCount || 0}`;
 
   const isRedBadge = show.hubBadgeType === 'secondary' || show.hubBadgeType === 'primary';
+
+  if (viewMode === 'carousel') {
+    const posterSrc = show.posterPath || show.featuredImage || show.backdropPath || DEFAULT_POSTER;
+    const releaseYear = show.firstAirDate
+      ? show.firstAirDate.split('-')[0]
+      : show.releaseDate
+      ? show.releaseDate.split('-')[0]
+      : '';
+    const genreDisplay = show.genres && show.genres.length > 0 ? show.genres.slice(0, 2).join(' · ') : '';
+
+    return (
+      <article className="group relative flex flex-col rounded-2xl overflow-hidden bg-[#201f1f] border border-[#353534] shadow-md hover:shadow-2xl transition-all duration-300 hover:-translate-y-1.5 shrink-0 w-[220px] sm:w-[240px] md:w-[260px] snap-start">
+        {/* 2:3 Portrait Poster Stage */}
+        <div
+          className="w-full aspect-[2/3] relative overflow-hidden bg-[#0e0e0e] cursor-pointer"
+          onClick={() => onJoinHub?.(show)}
+        >
+          <img
+            src={posterSrc}
+            alt={show.title}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = DEFAULT_POSTER;
+            }}
+            className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#201f1f] via-[#201f1f]/20 to-transparent pointer-events-none" />
+
+          {/* Rank Badge */}
+          {rank !== undefined && (
+            <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 pointer-events-none">
+              <span className="px-2.5 py-1 rounded-xl bg-[#e50914] text-white font-black text-xs shadow-lg border border-white/20 tracking-wider">
+                #{rank}
+              </span>
+              {show.hubBadge && (
+                <span
+                  className={`hidden sm:inline-block px-2 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-md shadow-sm ${
+                    isRedBadge
+                      ? 'bg-[#b2000d]/90 text-[#ffbdb5] border border-[#e50914]/40'
+                      : 'bg-[#353534]/90 text-[#e5e2e1] border border-white/10'
+                  }`}
+                >
+                  {show.hubBadge}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Top-Right Bookmark Button */}
+          <div className="absolute top-2.5 right-2.5 z-10">
+            <button
+              type="button"
+              aria-label={isBookmarked ? `Remove ${show.title} from Watchlist` : `Bookmark ${show.title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleBookmark?.(show.id);
+              }}
+              className={`w-8 h-8 rounded-full backdrop-blur-md flex items-center justify-center transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50914] ${
+                isBookmarked
+                  ? 'bg-[#e50914] text-white shadow-md'
+                  : 'bg-[#0e0e0e]/80 text-[#e5e2e1] hover:text-[#e50914] hover:bg-[#0e0e0e]'
+              }`}
+            >
+              <span className="material-symbols-outlined text-sm">
+                {isBookmarked ? 'bookmark_added' : 'bookmark'}
+              </span>
+            </button>
+          </div>
+
+          {/* Hover Overlay CTA */}
+          <div className="absolute inset-0 bg-[#0e0e0e]/90 backdrop-blur-sm opacity-0 group-hover:opacity-100 flex flex-col justify-center items-center p-4 text-center transition-opacity duration-200 z-20">
+            <span className="material-symbols-outlined text-3xl text-[#e50914] mb-1">
+              forum
+            </span>
+            <span className="text-sm font-bold text-[#e5e2e1] mb-1 line-clamp-1">{show.title}</span>
+            <p className="text-[11px] text-[#e9bcb6]/80 line-clamp-3 mb-4 leading-relaxed">
+              {show.overview}
+            </p>
+            <div className="w-full flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onJoinHub?.(show);
+                }}
+                className="px-4 py-2 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white font-bold text-xs w-full shadow cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              >
+                Open Community
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewReviews?.(show);
+                }}
+                className="px-4 py-1.5 rounded-xl bg-[#2a2a2a] hover:bg-[#353534] text-[#e5e2e1] font-semibold text-xs w-full border border-[#353534] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffb4aa]"
+              >
+                View Reviews
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Card Content Footer */}
+        <div className="p-3 flex flex-col flex-1 justify-between gap-1.5">
+          <div>
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <h3
+                onClick={() => onJoinHub?.(show)}
+                className="text-sm font-bold text-[#e5e2e1] truncate group-hover:text-[#ffb4aa] transition-colors cursor-pointer"
+                title={show.title}
+              >
+                {show.title}
+              </h3>
+              <div className="flex items-center gap-1 text-[#e50914] shrink-0 font-bold text-xs">
+                <span className="material-symbols-outlined text-xs" style={{ fontVariationSettings: "'FILL' 1" }}>
+                  star
+                </span>
+                <span className="text-xs text-[#e5e2e1]">{ratingDisplay}</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs text-[#e9bcb6]/75">
+              <span className="truncate">{genreDisplay || (show.mediaType === 'tv' ? 'Series' : 'Film')}</span>
+              {releaseYear && <span className="text-[11px] shrink-0 font-medium text-[#e9bcb6]/60">{releaseYear}</span>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5 pt-1">
+            <button
+              type="button"
+              aria-label={`Open ${show.title} community hub`}
+              onClick={() => onJoinHub?.(show)}
+              className="w-full py-1.5 px-2 rounded-lg font-bold text-[11px] text-center bg-[#e50914] hover:bg-[#b2000d] text-white transition-colors flex items-center justify-center gap-1 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50914]"
+            >
+              <span className="material-symbols-outlined text-xs">forum</span>
+              <span>Hub</span>
+            </button>
+            <button
+              type="button"
+              aria-label={`View reviews for ${show.title}`}
+              onClick={() => onViewReviews?.(show)}
+              className="w-full py-1.5 px-2 rounded-lg bg-[#2a2a2a] hover:bg-[#353534] text-[#e5e2e1] text-[11px] font-semibold text-center border border-[#353534] transition-colors flex items-center justify-center gap-1 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffb4aa]"
+            >
+              <span className="material-symbols-outlined text-xs">rate_review</span>
+              <span>Reviews</span>
+            </button>
+          </div>
+        </div>
+      </article>
+    );
+  }
 
   if (viewMode === 'list') {
     return (

@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { MediaItem } from '../services/tmdb/types';
+import { getTrendingTvShows } from '../services/tmdb/tv';
+import { DEFAULT_BACKDROP, DEFAULT_POSTER } from '../services/tmdb/client';
+import { ShowCard } from '../components/directory/ShowCard';
 
 interface HomePageProps {
   searchQuery?: string;
@@ -11,154 +14,6 @@ interface HomePageProps {
   onRequestHub?: () => void;
   setNotificationToast?: (msg: string | null) => void;
 }
-
-const STRANGER_THINGS_ITEM: MediaItem = {
-  id: 'st-1396',
-  tmdbId: 66732,
-  title: 'Stranger Things',
-  overview:
-    'Hawkins is fractured, and the perimeter has breached. Fans around the globe are dissecting every gate coordinate, Vecna memory tape, and 80s synth motif as the endgame looms.',
-  posterPath:
-    'https://image.tmdb.org/t/p/w500/49WJfeN0moxb9IPfGn8AIqMGskD.jpg',
-  backdropPath:
-    'https://lh3.googleusercontent.com/aida-public/AB6AXuASQuUGHlozeTB-7aiBPIbIyrqa_Dy9ReTEydZ92M49bgusNTKWKexCS8rupIwjMcClu9vCySd64RV5Oiiz1LVLe4fuesqEqs_BO7pP-Vey1FgP6X8ufp4_dsrhW1JJcvPer3oXBef3C3BHpnYY6yP-iKYMnxCN3jzxdC6HL7JRj25bCBZ0qFXUnNdCa7Glz_Rzu8QJiHrX8rmZgK1MqvR0-RvMvA-cyVlAHV-G1zGD2skOANywqLxQAQ',
-  mediaType: 'tv',
-  releaseDate: '2016-07-15',
-  firstAirDate: '2016-07-15',
-  voteAverage: 8.6,
-  voteCount: 16840,
-  genres: ['Sci-Fi', 'Mystery', 'Drama', 'Horror'],
-};
-
-interface TrendingCommunityItem {
-  id: string;
-  title: string;
-  hubName: string;
-  onlineCount: string;
-  fansCount: string;
-  theoryExcerpt: string;
-  posterBg: string;
-  genre: string;
-  mediaItem: MediaItem;
-}
-
-const TRENDING_COMMUNITIES: TrendingCommunityItem[] = [
-  {
-    id: 'wednesday',
-    title: 'Wednesday',
-    hubName: 'Nevermore Academy',
-    onlineCount: '2.8k',
-    fansCount: '28.1k',
-    theoryExcerpt: '"Enid & Wednesday team-up theory trending"',
-    posterBg:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuB5XiDpYmGOCGMizpKGiX5HGrjcjj6huhwQXWgkT5pdslznLQ7laaM80RuyvbVU-aD9meHY_VStgHqt76V3UmwUnIR7n2J9As-4DycXcjRDTZ4hBKXsDiBuTo-E9Sqg-Ya8XspGVLrTs6nH-azIlFwlG4VUwm9yimnCSSE9yeho90rr-WA54qhVwu9b1TPr5Uf3QI9NsPQKyWdeTLjpmk23u_HzcvYDYwVGsaEIxryZ6tidBxA-XFM-Tw',
-    genre: 'Mystery · Fantasy',
-    mediaItem: {
-      id: '119051',
-      tmdbId: 119051,
-      title: 'Wednesday',
-      overview: 'Wednesday Addams misadventures at Nevermore Academy.',
-      posterPath: 'https://image.tmdb.org/t/p/w500/9PFonBhy4cQy7Jz20NpMygczOkv.jpg',
-      backdropPath: 'https://image.tmdb.org/t/p/original/iHSwvRVsRyxKuOC09ygvE0knQEG.jpg',
-      mediaType: 'tv',
-      voteAverage: 8.5,
-      voteCount: 7890,
-      genres: ['Mystery', 'Comedy', 'Fantasy'],
-    },
-  },
-  {
-    id: 'dark',
-    title: 'Dark',
-    hubName: 'Winden Quantum Hub',
-    onlineCount: '1.1k',
-    fansCount: '19.4k',
-    theoryExcerpt: '"Cycle 3 paradox flowchart mapped"',
-    posterBg:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuDfIXP5UXb2K3E4VcNCDQbdA6yTChHrdfqGr9OZL9Vbvn_E7sQSMCv-EiWoXfaaZKJz7BJOsBkpPZ5ZaZdCdqVTu8THuCRebIkOJwqTUoEgrANKfTQ0i5j82ShlH6URF1m33OZ-ABt5k2ogJOYhzQQdLxLpwFyQpIzUxE0IvacRM1-6Zr8DPtT7IrauiPCXeEfWeAXOy3u4bkaJVSxdMQ_atCZnf6D-fAHSxrXMvWmNIvPOMfdNU_Mp5g',
-    genre: 'Sci-Fi · Mystery',
-    mediaItem: {
-      id: '70523',
-      tmdbId: 70523,
-      title: 'Dark',
-      overview: 'A missing child sets four families on a frantic hunt for answers.',
-      posterPath: 'https://image.tmdb.org/t/p/w500/apbrbWs8M9lyOpJYU5WXrpFbk1Z.jpg',
-      backdropPath: 'https://image.tmdb.org/t/p/original/3lBDg3i6nnOccRsgUGmVvxYRKVW.jpg',
-      mediaType: 'tv',
-      voteAverage: 8.4,
-      voteCount: 6120,
-      genres: ['Sci-Fi', 'Mystery', 'Drama'],
-    },
-  },
-  {
-    id: 'squid-game',
-    title: 'Squid Game',
-    hubName: 'VIP Lounge',
-    onlineCount: '4.9k',
-    fansCount: '34.8k',
-    theoryExcerpt: '"Season 2 arena theories active"',
-    posterBg:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuBrEe6DvWnvSy2WaOrKHy5IC0nJbiKY_oNxJA2S_Mjs55o1cDbY2d1s5xVD2rZyDiPNamLhKKyoePgVecbbcGXax-ViNPIDBzMcMLiK78KdO2LMrH2evfbncWCypaLrdvzjGf-P0k841PtFCFKiq65DLlcuyUitiz-kVYme6eu7XM_0zIueoUUEnEsgDMiS7TY7hfD0OTJeqN75N5eg_-XlyCMfnoMhLAKo_13cznlCH8exFCfOoGQbVA',
-    genre: 'Thriller · Drama',
-    mediaItem: {
-      id: '93405',
-      tmdbId: 93405,
-      title: 'Squid Game',
-      overview: 'Hundreds of cash-strapped players accept a strange invitation.',
-      posterPath: 'https://image.tmdb.org/t/p/w500/dDlG5n0iH4c6u0C2qWzC3cR3uQv.jpg',
-      backdropPath: 'https://image.tmdb.org/t/p/original/oaGvjB0DvdNDbdPtDcX0ag9QgNV.jpg',
-      mediaType: 'tv',
-      voteAverage: 7.8,
-      voteCount: 14200,
-      genres: ['Action', 'Mystery', 'Drama'],
-    },
-  },
-  {
-    id: 'the-witcher',
-    title: 'The Witcher',
-    hubName: 'Continental Lodge',
-    onlineCount: '890',
-    fansCount: '15.2k',
-    theoryExcerpt: '"Book fidelity discussion #42"',
-    posterBg:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuAeSp42uo28vtxwuXDqGgeRgdYmo_Z9ktAAej_OvPtOkX_CBejZZc_LcER-vzdObq01cWGptvpYvdiZnsbn3F-1leRGEyU7NR8s-EOqYKgfL8usmI0Yv8KA5NVLMrc0Dq_WE1UgGqnLMY619GUA3losRjilnINZbU6XGypN7klZAnBDLRC8vrkXBDMObFD5q-nSoFFlQNZ0Wj-1PqKkuCbX0E0uTxhi9Ux-NeUgUsTkerQR84LuOOEA0w',
-    genre: 'Fantasy · Action',
-    mediaItem: {
-      id: '71912',
-      tmdbId: 71912,
-      title: 'The Witcher',
-      overview: 'Geralt of Rivia, a mutated monster-hunter for hire.',
-      posterPath: 'https://image.tmdb.org/t/p/w500/cZ0d3rtvXPVvuiX22434W1fT5r6.jpg',
-      backdropPath: 'https://image.tmdb.org/t/p/original/jBJWaqoSCiARWtfV0Glq6YQ69x.jpg',
-      mediaType: 'tv',
-      voteAverage: 8.0,
-      voteCount: 5400,
-      genres: ['Sci-Fi', 'Fantasy', 'Action'],
-    },
-  },
-  {
-    id: 'black-mirror',
-    title: 'Black Mirror',
-    hubName: 'Tech Dystopia',
-    onlineCount: '1.6k',
-    fansCount: '22.0k',
-    theoryExcerpt: '"Interactive episode breakdowns"',
-    posterBg:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuD2zaRZeKoVCFkzCw4DWEsMjzdR6Q-4M-GdKLbFKlBMmfL0uEEiANoobIaMQIy1qGoPF0m5J8VQxyUt_Zx88g34f2Ki76me32mf2TFJC-2cuXNXEqlNKabdBJA5kH1aVxmGGRepOWIZyN1sN-s5fyJI6o6LNpYy7tvopcHyaOk8MCDQgkAoi3_fPySzXI7vxMn4klFOR4Ms8OfCmyQr5Nn9Ax1St5wLWaFeKQnFG8xE-vMk3SVWsCzrmA',
-    genre: 'Sci-Fi · Thriller',
-    mediaItem: {
-      id: '42009',
-      tmdbId: 42009,
-      title: 'Black Mirror',
-      overview: 'Overarching anthology series exploring a twisted, high-tech near-future.',
-      posterPath: 'https://image.tmdb.org/t/p/w500/7Rum0Wj969G1mR6p5u2MvF6YyR2.jpg',
-      backdropPath: 'https://image.tmdb.org/t/p/original/56v2KjUmLeVoV291x5gq1L1r3t.jpg',
-      mediaType: 'tv',
-      voteAverage: 8.3,
-      voteCount: 4800,
-      genres: ['Sci-Fi', 'Drama', 'Mystery'],
-    },
-  },
-];
 
 const GENRE_BAR = [
   'All Genres',
@@ -178,8 +33,128 @@ export const HomePage: React.FC<HomePageProps> = ({
   onViewReviews,
   setNotificationToast,
 }) => {
+  // TMDB Trending TV Shows State
+  const [trendingShows, setTrendingShows] = useState<MediaItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Active Hero Slide Index (0 to 4) & Hover state for autoplay
+  const [activeSlideIndex, setActiveSlideIndex] = useState<number>(0);
+  const [isHeroHovered, setIsHeroHovered] = useState<boolean>(false);
+
+  // Genre & Reviews Tabs State
   const [selectedGenre, setSelectedGenre] = useState('All Genres');
   const [activeReviewTab, setActiveReviewTab] = useState<'week' | 'all' | 'helpful'>('week');
+
+  // Carousel Scrolling State & Ref (for section 3)
+  const carouselRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  // Ref tracking mounted status across async operations
+  const isMountedRef = useRef(true);
+  // Monotonic request ID counter to prevent stale out-of-order responses from overwriting fresh state
+  const requestIdRef = useRef(0);
+
+  // Fetch Trending TV Shows from API service layer (for manual retry)
+  const handleRetry = useCallback(() => {
+    setIsLoading(true);
+    setError(null);
+    const thisRequestId = ++requestIdRef.current;
+
+    getTrendingTvShows(1, true)
+      .then((shows) => {
+        if (!isMountedRef.current || thisRequestId !== requestIdRef.current) return;
+        const validShows = (shows || []).filter((s) => s && s.id && s.title);
+        setTrendingShows(validShows);
+      })
+      .catch((err: unknown) => {
+        if (!isMountedRef.current || thisRequestId !== requestIdRef.current) return;
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Unable to reach the PopCho media service. Please ensure the backend is running.';
+        setError(msg);
+      })
+      .finally(() => {
+        if (isMountedRef.current && thisRequestId === requestIdRef.current) {
+          setIsLoading(false);
+        }
+      });
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    const thisRequestId = ++requestIdRef.current;
+
+    getTrendingTvShows(1, false)
+      .then((shows) => {
+        if (!isMountedRef.current || thisRequestId !== requestIdRef.current) return;
+        const validShows = (shows || []).filter((s) => s && s.id && s.title);
+        setTrendingShows(validShows);
+      })
+      .catch((err: unknown) => {
+        if (!isMountedRef.current || thisRequestId !== requestIdRef.current) return;
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Unable to reach the PopCho media service. Please ensure the backend is running.';
+        setError(msg);
+      })
+      .finally(() => {
+        if (isMountedRef.current && thisRequestId === requestIdRef.current) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Update carousel navigation buttons on scroll/resize
+  const updateScrollButtons = useCallback(() => {
+    const el = carouselRef.current;
+    if (!el) return;
+    const hasOverflow = el.scrollWidth > el.clientWidth + 1;
+    setCanScrollLeft(el.scrollLeft > 10);
+    setCanScrollRight(hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 10);
+  }, []);
+
+  useEffect(() => {
+    const el = carouselRef.current;
+    if (!el) return;
+    const rafId = requestAnimationFrame(updateScrollButtons);
+    el.addEventListener('scroll', updateScrollButtons, { passive: true });
+    window.addEventListener('resize', updateScrollButtons);
+    return () => {
+      cancelAnimationFrame(rafId);
+      el.removeEventListener('scroll', updateScrollButtons);
+      window.removeEventListener('resize', updateScrollButtons);
+    };
+  }, [updateScrollButtons, trendingShows, isLoading]);
+
+  const handleScroll = (direction: 'prev' | 'next') => {
+    const el = carouselRef.current;
+    if (!el) return;
+    // Calculate card step dynamically from first rendered card + flex gap
+    const firstCard = el.firstElementChild as HTMLElement | null;
+    const cardStep = firstCard ? firstCard.offsetWidth + 16 : 256;
+    // 1 card step on mobile (< 768px), 2 card steps on tablet & desktop
+    const multiplier = window.innerWidth < 768 ? 1 : 2;
+    const scrollDistance = direction === 'prev' ? -cardStep * multiplier : cardStep * multiplier;
+    el.scrollBy({ left: scrollDistance, behavior: 'smooth' });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      handleScroll('prev');
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      handleScroll('next');
+    }
+  };
 
   // Pulse thread likes
   const [threadLikes, setThreadLikes] = useState({
@@ -201,150 +176,397 @@ export const HomePage: React.FC<HomePageProps> = ({
     });
   };
 
-  const isStBookmarked = Boolean(bookmarkedIds[STRANGER_THINGS_ITEM.id]);
+  // Top 5 trending TV shows for the cinematic hero slider
+  const topFiveTrending = trendingShows.slice(0, 5);
+  const slideCount = topFiveTrending.length;
+  const safeActiveIndex = slideCount > 0 ? Math.min(activeSlideIndex, slideCount - 1) : 0;
+  const featuredShow = topFiveTrending[safeActiveIndex] || null;
+
+  // Slide navigation callbacks
+  const handlePrevSlide = useCallback(() => {
+    if (slideCount <= 1) return;
+    setActiveSlideIndex((prev) => (prev - 1 + slideCount) % slideCount);
+  }, [slideCount]);
+
+  const handleNextSlide = useCallback(() => {
+    if (slideCount <= 1) return;
+    setActiveSlideIndex((prev) => (prev + 1) % slideCount);
+  }, [slideCount]);
+
+  const handleSelectSlide = useCallback((index: number) => {
+    setActiveSlideIndex(index);
+  }, []);
+
+  // Keyboard navigation for hero slider
+  const handleHeroKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      handlePrevSlide();
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      handleNextSlide();
+    }
+  };
+
+  // Autoplay effect with pause-on-hover, document visibility, and prefers-reduced-motion guards
+  useEffect(() => {
+    if (slideCount <= 1 || isHeroHovered) return;
+
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (prefersReducedMotion) return;
+
+    let isDocumentVisible =
+      typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
+    const handleVisibilityChange = () => {
+      isDocumentVisible = document.visibilityState === 'visible';
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const intervalId = setInterval(() => {
+      if (isDocumentVisible && !isHeroHovered) {
+        setActiveSlideIndex((prev) => (prev + 1) % slideCount);
+      }
+    }, 6500);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [slideCount, isHeroHovered, activeSlideIndex]);
 
   return (
-    <main className="w-full min-h-screen bg-[#131313] text-[#e5e2e1] -mt-[68px]">
+    <main className="w-full min-h-screen bg-[#131313] text-[#e5e2e1] -mt-[68px] overflow-x-clip">
       <div className="flex flex-col w-full">
         {/* ========================================================================= */}
-        {/* 1. CINEMATIC HERO STAGE (Screen 7bbed666b8da4ddcbcd2d4214343e2b7)       */}
+        {/* 1. CINEMATIC TOP 5 TRENDING HERO SLIDER (STITCH REFERENCE)                */}
         {/* ========================================================================= */}
-        <section className="relative w-full overflow-hidden">
-          <div
-            className="w-full min-h-[620px] lg:min-h-[720px] bg-cover bg-center relative flex items-end"
-            style={{
-              backgroundImage: `url('${STRANGER_THINGS_ITEM.backdropPath}')`,
-            }}
-          >
-            {/* Multi-stop Scrim Gradients */}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#131313] via-[#131313]/75 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-r from-[#131313] via-[#131313]/60 to-transparent" />
-            <div className="absolute top-0 inset-x-0 h-40 bg-gradient-to-b from-[#0e0e0e]/80 to-transparent" />
-
-            {/* Floating Top Left / Right Stitch Cards on Hero (Ambient Overlays) */}
-            <div className="absolute top-24 left-6 hidden xl:flex flex-col gap-2 p-3.5 rounded-2xl bg-[#0e0e0e]/75 backdrop-blur-md border border-[#353534]/70 shadow-2xl max-w-xs z-20 pointer-events-none opacity-85">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#e50914]">
-                Community Activity
-              </span>
-              <p className="text-xs font-bold text-[#e5e2e1]">Season 5 Theories &amp; Live Decodes</p>
-              <p className="text-[11px] text-[#e9bcb6]/80 line-clamp-2">
-                Upside Down Cosplay Contest • 182 new theory posts today
-              </p>
-            </div>
-
-            <div className="absolute top-24 right-6 hidden xl:flex flex-col gap-2 p-3.5 rounded-2xl bg-[#0e0e0e]/75 backdrop-blur-md border border-[#353534]/70 shadow-2xl max-w-xs z-20 pointer-events-none opacity-85">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#70dc8e]">
-                  Discover Channels
-                </span>
-                <span className="text-[10px] text-[#70dc8e] font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#70dc8e] animate-ping" />
-                  Live Sync
-                </span>
-              </div>
-              <div className="text-[11px] text-[#e9bcb6] space-y-1">
-                <p>#theories • 781 active</p>
-                <p>#fan-art • 152 active</p>
-                <p>#episodes • 232 active</p>
-              </div>
-            </div>
-
-            {/* Hero Main Content */}
-            <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-[140px] pb-10 flex flex-col justify-end">
-              {/* Live Status Pill & Metadata Row */}
-              <div className="flex flex-wrap items-center gap-2 mb-3">
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0e0e0e]/90 backdrop-blur-md shadow-sm border border-[#353534]/50">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#70dc8e] opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-[#008442]" />
-                  </span>
-                  <span className="text-xs font-semibold text-[#e5e2e1] uppercase tracking-wider">
-                    12.4k Online in Hub
-                  </span>
+        <section
+          id="hero-carousel-section"
+          aria-label="Top 5 Trending Shows Hero Slider"
+          onMouseEnter={() => setIsHeroHovered(true)}
+          onMouseLeave={() => setIsHeroHovered(false)}
+          onKeyDown={handleHeroKeyDown}
+          tabIndex={0}
+          className="relative w-full overflow-hidden bg-[#0e0e0e] focus:outline-none"
+        >
+          {isLoading ? (
+            /* Loading Hero Skeleton */
+            <div className="w-full min-h-[620px] lg:min-h-[680px] bg-[#1a1a1a] relative flex items-end animate-pulse">
+              <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-[140px] pb-10 flex flex-col justify-end">
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  <div className="h-7 w-36 bg-[#2a2a2a] rounded-full" />
+                  <div className="h-7 w-32 bg-[#2a2a2a] rounded-full" />
+                  <div className="h-7 w-24 bg-[#2a2a2a] rounded-full" />
                 </div>
-
-                <span className="px-3 py-1 rounded-full bg-[#e50914] text-white text-xs font-extrabold uppercase tracking-widest shadow-md">
-                  Season 5 Anticipation Hub
-                </span>
-
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2a2a2a]/90 text-[#e9bcb6] text-xs font-semibold border border-[#353534]/50">
-                  <span className="material-symbols-outlined text-sm text-[#ffb4aa]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                    star
-                  </span>
-                  <span className="font-bold text-[#e5e2e1]">4.9</span>
-                  <span className="opacity-70">(18.4k reviews)</span>
+                <div className="h-12 sm:h-16 w-3/4 max-w-xl bg-[#2a2a2a] rounded-2xl mb-4" />
+                <div className="h-4 w-72 bg-[#2a2a2a] rounded mb-3" />
+                <div className="space-y-2 max-w-2xl mb-6">
+                  <div className="h-3.5 w-full bg-[#2a2a2a] rounded" />
+                  <div className="h-3.5 w-5/6 bg-[#2a2a2a] rounded" />
+                  <div className="h-3.5 w-2/3 bg-[#2a2a2a] rounded" />
                 </div>
-              </div>
-
-              {/* Dramatic Headline Block */}
-              <div className="max-w-3xl">
-                <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold text-[#e5e2e1] tracking-tight uppercase leading-none drop-shadow-2xl select-none mb-3">
-                  STRANGER THINGS
-                </h1>
-
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-[#e9bcb6] mb-3">
-                  <span>1983 Hawkins, IN</span>
-                  <span className="w-1 h-1 rounded-full bg-[#353534]" />
-                  <span>Sci-Fi Mystery &amp; Horror</span>
-                  <span className="w-1 h-1 rounded-full bg-[#353534]" />
-                  <span className="text-[#ffb4aa] font-bold">45.2k Active Theorists</span>
-                  <span className="w-1 h-1 rounded-full bg-[#353534]" />
-                  <span className="px-1.5 py-0.5 rounded bg-[#2a2a2a] text-[#e5e2e1] text-[11px] font-bold border border-[#353534]">
-                    TV-MA
-                  </span>
-                </div>
-
-                <p className="text-sm sm:text-base text-[#e9bcb6]/90 max-w-2xl mb-6 leading-relaxed drop-shadow">
-                  Hawkins is fractured, and the perimeter has breached. Fans around the globe are dissecting every gate coordinate, Vecna memory tape, and 80s synth motif as the endgame looms.
-                </p>
-
-                {/* Call-To-Action Row */}
                 <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => onJoinHub(STRANGER_THINGS_ITEM)}
-                    className="flex items-center gap-2 px-6 py-3 rounded-xl bg-[#e50914] text-white font-bold text-sm shadow-xl hover:bg-[#b2000d] transition-all active:scale-[0.98] cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>
-                      forum
-                    </span>
-                    <span>Join Community Discussion</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => onViewReviews(STRANGER_THINGS_ITEM)}
-                    className="flex items-center gap-2 px-6 py-3 rounded-xl bg-[#2a2a2a] hover:bg-[#353534] text-[#e5e2e1] font-semibold text-sm shadow-md transition-all active:scale-[0.98] border border-[#353534] cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-lg text-[#ffb4aa]">reviews</span>
-                    <span>Read 3,420 Fan Reviews</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onToggleBookmark(STRANGER_THINGS_ITEM.id);
-                      setNotificationToast?.(
-                        isStBookmarked
-                          ? 'Removed Stranger Things from Watchlist'
-                          : 'Added Stranger Things to Watchlist'
-                      );
-                    }}
-                    className={`p-3 rounded-xl transition-all shadow-sm border border-[#353534] cursor-pointer ${
-                      isStBookmarked
-                        ? 'bg-[#e50914] text-white'
-                        : 'bg-[#201f1f] hover:bg-[#2a2a2a] text-[#e9bcb6]'
-                    }`}
-                    title="Bookmark Stranger Things Hub"
-                  >
-                    <span className="material-symbols-outlined text-xl">
-                      {isStBookmarked ? 'bookmark_added' : 'bookmark_add'}
-                    </span>
-                  </button>
+                  <div className="h-12 w-48 bg-[#2a2a2a] rounded-xl" />
+                  <div className="h-12 w-40 bg-[#2a2a2a] rounded-xl" />
+                  <div className="h-12 w-12 bg-[#2a2a2a] rounded-xl" />
                 </div>
               </div>
             </div>
-          </div>
+          ) : error && topFiveTrending.length === 0 ? (
+            /* API Failure Hero State */
+            <div className="w-full min-h-[460px] lg:min-h-[520px] bg-[#1a1a1a] relative flex items-center justify-center p-6 border-b border-[#353534]">
+              <div className="max-w-md text-center flex flex-col items-center gap-3">
+                <div className="w-14 h-14 rounded-full bg-[#e50914]/20 text-[#e50914] flex items-center justify-center">
+                  <span className="material-symbols-outlined text-3xl">cloud_off</span>
+                </div>
+                <h2 className="text-xl font-bold text-[#e5e2e1]">Unable to Load Trending Title</h2>
+                <p className="text-xs text-[#e9bcb6]/80 leading-relaxed">{error}</p>
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  className="mt-2 px-6 py-2.5 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                >
+                  Retry Connection
+                </button>
+              </div>
+            </div>
+          ) : topFiveTrending.length === 0 ? (
+            /* Empty Results Hero State */
+            <div className="w-full min-h-[460px] bg-[#1a1a1a] flex items-center justify-center p-6 border-b border-[#353534]">
+              <div className="text-center">
+                <p className="text-sm text-[#e9bcb6]">No trending TV titles found at this moment.</p>
+                <a
+                  href="/discover"
+                  className="mt-3 inline-block px-5 py-2 rounded-xl bg-[#e50914] text-white text-xs font-bold"
+                >
+                  Browse Catalog
+                </a>
+              </div>
+            </div>
+          ) : (
+            /* Dynamic Top 5 Trending Hero Slider */
+            <>
+              {/* Carousel Slides Container */}
+              <div className="relative w-full min-h-[620px] lg:min-h-[680px]">
+                {topFiveTrending.map((show, index) => {
+                  const isActive = index === safeActiveIndex;
+                  const backdrop = show.backdropPath || show.posterPath || DEFAULT_BACKDROP;
+                  const isBookmarked = Boolean(bookmarkedIds[show.id]);
+                  const ratingDisplay =
+                    show.voteAverage && show.voteAverage > 0 ? show.voteAverage.toFixed(1) : 'NR';
+                  const releaseYear = show.firstAirDate
+                    ? show.firstAirDate.split('-')[0]
+                    : show.releaseDate
+                    ? show.releaseDate.split('-')[0]
+                    : 'TV Series';
+                  const genresDisplay =
+                    show.genres && show.genres.length > 0
+                      ? show.genres.slice(0, 3).join(' · ')
+                      : 'Television Series';
+
+                  return (
+                    <div
+                      key={show.id}
+                      aria-hidden={!isActive}
+                      className={`transition-opacity duration-700 ease-out flex items-center w-full min-h-[620px] lg:min-h-[680px] ${
+                        isActive
+                          ? 'opacity-100 relative z-10'
+                          : 'opacity-0 pointer-events-none absolute inset-0 z-0'
+                      }`}
+                    >
+                      {/* Backdrop Keyframe with Multi-stop Scrim Gradients */}
+                      <div
+                        className="absolute inset-0 bg-cover bg-center transition-all duration-700"
+                        style={{
+                          backgroundImage: `url('${backdrop}')`,
+                        }}
+                      >
+                        {/* Gradient overlays matching Stitch reference */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#131313] via-[#131313]/60 to-[#0e0e0e]/40" />
+                        <div className="absolute inset-0 bg-gradient-to-r from-[#0e0e0e] via-[#0e0e0e]/85 to-transparent w-full md:w-3/4" />
+                        <div className="absolute top-0 inset-x-0 h-36 bg-gradient-to-b from-[#0e0e0e]/80 to-transparent" />
+                      </div>
+
+                      {/* Slide Content */}
+                      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-[140px] pb-12 flex flex-col justify-end lg:justify-center">
+                        <div className="max-w-2xl flex flex-col gap-3.5">
+                          {/* Trending Tag & Metadata Signals */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#e50914] text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-[#e50914]/30">
+                              <span
+                                className="material-symbols-outlined text-sm"
+                                style={{ fontVariationSettings: "'FILL' 1" }}
+                              >
+                                local_fire_department
+                              </span>
+                              <span>#{index + 1} Trending on PopCho</span>
+                            </span>
+
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#2a2a2a]/90 backdrop-blur-md text-[#e5e2e1] text-xs font-semibold border border-[#353534]/50">
+                              <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#70dc8e] opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#008442]" />
+                              </span>
+                              <span>{show.hubBadge || 'Community Hub Active'}</span>
+                            </div>
+
+                            <div className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-[#201f1f]/80 text-[#e9bcb6] text-xs font-semibold border border-[#353534]/50">
+                              <span
+                                className="material-symbols-outlined text-sm text-[#ffb4aa]"
+                                style={{ fontVariationSettings: "'FILL' 1" }}
+                              >
+                                star
+                              </span>
+                              <span className="font-bold text-[#e5e2e1]">{ratingDisplay}</span>
+                              {show.voteCount > 0 && (
+                                <span className="opacity-70 text-[11px]">
+                                  ({show.voteCount.toLocaleString()} votes)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Title & Metadata */}
+                          <div>
+                            <p className="text-xs uppercase tracking-widest text-[#ffb4aa] font-semibold mb-1">
+                              {genresDisplay} • {releaseYear} • {show.statusText || 'TV Series'}
+                            </p>
+                            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-[#e5e2e1] tracking-tight uppercase leading-none drop-shadow-2xl select-none mb-1 break-words">
+                              {show.title}
+                            </h1>
+                          </div>
+
+                          {/* Overview */}
+                          <p className="text-sm sm:text-base text-[#e9bcb6]/90 max-w-2xl leading-relaxed drop-shadow line-clamp-3">
+                            {show.overview}
+                          </p>
+
+                          {/* Call-To-Action Row */}
+                          <div className="flex flex-wrap items-center gap-3 pt-2">
+                            <button
+                              type="button"
+                              tabIndex={isActive ? 0 : -1}
+                              onClick={() => onJoinHub(show)}
+                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white font-bold text-sm shadow-xl shadow-[#e50914]/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                            >
+                              <span
+                                className="material-symbols-outlined text-xl"
+                                style={{ fontVariationSettings: "'FILL' 1" }}
+                              >
+                                forum
+                              </span>
+                              <span>Join Community Discussion</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              tabIndex={isActive ? 0 : -1}
+                              onClick={() => onViewReviews(show)}
+                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#2a2a2a]/90 hover:bg-[#353534] text-[#e5e2e1] font-semibold text-sm backdrop-blur-md transition-all border border-[#353534] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                            >
+                              <span className="material-symbols-outlined text-xl text-[#ffb4aa]">
+                                rate_review
+                              </span>
+                              <span>Read Fan Reviews</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              tabIndex={isActive ? 0 : -1}
+                              onClick={() => {
+                                onToggleBookmark(show.id);
+                                setNotificationToast?.(
+                                  isBookmarked
+                                    ? `Removed ${show.title} from Watchlist`
+                                    : `Added ${show.title} to Watchlist`
+                                );
+                              }}
+                              className={`p-3 rounded-xl transition-all shadow-sm border border-[#353534] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${
+                                isBookmarked
+                                  ? 'bg-[#e50914] text-white'
+                                  : 'bg-[#2a2a2a]/80 hover:bg-[#353534] text-[#e9bcb6] hover:text-white'
+                              }`}
+                              title={isBookmarked ? `Remove ${show.title}` : `Bookmark ${show.title}`}
+                              aria-label={
+                                isBookmarked
+                                  ? `Remove ${show.title} from Watchlist`
+                                  : `Bookmark ${show.title}`
+                              }
+                            >
+                              <span className="material-symbols-outlined text-xl">
+                                {isBookmarked ? 'bookmark_added' : 'bookmark_border'}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Floating Edge Prev & Next Arrow Controls */}
+                {slideCount > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handlePrevSlide}
+                      aria-label="Previous trending show"
+                      className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 z-30 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#0e0e0e]/85 hover:bg-[#2a2a2a] text-[#e5e2e1] flex items-center justify-center backdrop-blur-md transition-all hover:scale-105 active:scale-95 shadow-2xl border border-[#353534]/70 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50914]"
+                    >
+                      <span className="material-symbols-outlined text-2xl">chevron_left</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleNextSlide}
+                      aria-label="Next trending show"
+                      className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 z-30 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#0e0e0e]/85 hover:bg-[#2a2a2a] text-[#e5e2e1] flex items-center justify-center backdrop-blur-md transition-all hover:scale-105 active:scale-95 shadow-2xl border border-[#353534]/70 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50914]"
+                    >
+                      <span className="material-symbols-outlined text-2xl">chevron_right</span>
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Carousel Bottom Thumbnails & Switcher Bar */}
+              {slideCount > 0 && (
+                <nav
+                  aria-label="Top 5 Trending Shows selector"
+                  className="relative z-20 w-full bg-[#0e0e0e]/95 backdrop-blur-md py-3 px-4 sm:px-6 lg:px-8 border-t border-[#353534]/60"
+                >
+                  <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 overflow-x-auto pb-1 scrollbar-none">
+                    {topFiveTrending.map((show, index) => {
+                      const isActive = index === safeActiveIndex;
+                      const thumbSrc = show.posterPath || show.backdropPath || DEFAULT_POSTER;
+                      const year =
+                        show.firstAirDate?.split('-')[0] || show.releaseDate?.split('-')[0] || 'TV';
+                      const rating =
+                        show.voteAverage && show.voteAverage > 0
+                          ? `★ ${show.voteAverage.toFixed(1)}`
+                          : 'Trending';
+
+                      return (
+                        <button
+                          key={show.id}
+                          type="button"
+                          onClick={() => handleSelectSlide(index)}
+                          aria-current={isActive ? 'true' : undefined}
+                          aria-label={`Trending #${index + 1}: ${show.title}`}
+                          className={`flex items-center gap-3 p-2 rounded-xl text-left transition-all flex-shrink-0 group w-48 sm:w-56 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50914] ${
+                            isActive
+                              ? 'bg-[#201f1f] ring-1 ring-[#e50914] shadow-lg shadow-[#e50914]/15'
+                              : 'bg-[#0e0e0e] hover:bg-[#1a1a1a] opacity-80 hover:opacity-100'
+                          }`}
+                        >
+                          <div className="w-10 h-10 rounded-lg overflow-hidden bg-[#2a2a2a] flex-shrink-0 relative">
+                            <img
+                              src={thumbSrc}
+                              alt=""
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).src = DEFAULT_POSTER;
+                              }}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                            <span
+                              className={`absolute top-0.5 left-0.5 text-[9px] font-black px-1 rounded shadow-sm ${
+                                isActive ? 'bg-[#e50914] text-white' : 'bg-[#2a2a2a] text-[#e5e2e1]'
+                              }`}
+                            >
+                              #{index + 1}
+                            </span>
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <p
+                              className={`text-[10px] sm:text-[11px] uppercase font-bold truncate transition-colors ${
+                                isActive
+                                  ? 'text-[#ffb4aa]'
+                                  : 'text-[#e9bcb6]/60 group-hover:text-[#e9bcb6]'
+                              }`}
+                            >
+                              Trending #{index + 1}
+                            </p>
+                            <p className="text-xs font-bold text-[#e5e2e1] truncate group-hover:text-white">
+                              {show.title}
+                            </p>
+                            <p className="text-[10px] text-[#e9bcb6]/60 truncate">
+                              {rating} • {year}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </nav>
+              )}
+            </>
+          )}
         </section>
 
         {/* ========================================================================= */}
@@ -373,88 +595,111 @@ export const HomePage: React.FC<HomePageProps> = ({
                 ))}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setNotificationToast?.('Filter Drawer: 14 TV Networks, 8 Languages indexed.')}
-                className="hidden lg:flex items-center gap-1.5 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] shrink-0 px-3 py-1 rounded-full bg-[#201f1f] border border-[#353534]/50 cursor-pointer"
+              <a
+                href="/discover"
+                className="hidden lg:flex items-center gap-1.5 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] shrink-0 px-3 py-1 rounded-full bg-[#201f1f] border border-[#353534]/50 cursor-pointer transition-colors"
               >
                 <span className="material-symbols-outlined text-sm">tune</span>
-                <span>Filters</span>
-              </button>
+                <span>All Filters</span>
+              </a>
             </div>
           </div>
         </section>
 
         {/* ========================================================================= */}
-        {/* 3. TRENDING SHOW COMMUNITIES (5-Column Poster Layout)                    */}
+        {/* 3. TOP-FIVE TRENDING TV SHOWS CAROUSEL (DYNAMIC FROM TMDB WEEKLY)        */}
         {/* ========================================================================= */}
         <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
             <div className="flex items-center gap-2">
               <span className="text-2xl">🔥</span>
-              <h2 className="text-2xl font-bold text-[#e5e2e1]">Trending Show Communities</h2>
+              <h2 className="text-2xl font-bold text-[#e5e2e1]">Top 5 Trending TV Shows</h2>
             </div>
-            <a
-              href="/discover"
-              className="text-xs sm:text-sm font-semibold text-[#ffb4aa] hover:text-[#e5e2e1] flex items-center gap-0.5 transition-colors"
-            >
-              <span>Explore All Hubs</span>
-              <span className="material-symbols-outlined text-base">chevron_right</span>
-            </a>
-          </div>
 
-          {/* 5-Column Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-            {TRENDING_COMMUNITIES.map((comm) => (
-              <div
-                key={comm.id}
-                className="group relative flex flex-col rounded-2xl overflow-hidden bg-[#201f1f] border border-[#353534] shadow-md hover:shadow-2xl transition-all duration-300 hover:-translate-y-1.5"
-              >
-                <div
-                  className="w-full aspect-[2/3] bg-cover bg-center relative"
-                  style={{ backgroundImage: `url('${comm.posterBg}')` }}
+            <div className="flex items-center gap-3">
+              {/* Functional Carousel Prev/Next Controls */}
+              <div className="flex items-center gap-1.5 bg-[#201f1f] p-1 rounded-xl border border-[#353534]/60">
+                <button
+                  type="button"
+                  onClick={() => handleScroll('prev')}
+                  disabled={!canScrollLeft}
+                  aria-label="Previous trending shows"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[#e5e2e1] hover:bg-[#2a2a2a] transition-all disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50914]"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#201f1f] via-[#201f1f]/20 to-transparent" />
-
-                  <div className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#0e0e0e]/85 backdrop-blur text-[11px] font-semibold text-[#e5e2e1] border border-[#353534]/50">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#70dc8e] animate-pulse" />
-                    <span>{comm.onlineCount} live</span>
-                  </div>
-
-                  {/* Hover Overlay CTA */}
-                  <div className="absolute inset-0 bg-[#0e0e0e]/90 backdrop-blur-sm opacity-0 group-hover:opacity-100 flex flex-col justify-center items-center p-4 text-center transition-opacity duration-200">
-                    <span className="material-symbols-outlined text-3xl text-[#e50914] mb-1">
-                      forum
-                    </span>
-                    <span className="text-sm font-bold text-[#e5e2e1] mb-1">{comm.hubName}</span>
-                    <p className="text-[11px] text-[#e9bcb6]/80 line-clamp-2 mb-3">
-                      {comm.theoryExcerpt}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => onJoinHub(comm.mediaItem)}
-                      className="px-4 py-2 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white font-bold text-xs w-full shadow cursor-pointer"
-                    >
-                      Open Community
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-3 flex flex-col flex-1 justify-between gap-1">
-                  <div>
-                    <div className="flex items-center justify-between gap-1 mb-0.5">
-                      <h3 className="text-sm font-bold text-[#e5e2e1] truncate group-hover:text-[#ffb4aa] transition-colors">
-                        {comm.title}
-                      </h3>
-                      <span className="text-[11px] text-[#e9bcb6]/70 shrink-0">{comm.fansCount}</span>
-                    </div>
-                    <p className="text-xs text-[#ffb4aa] font-medium truncate">{comm.hubName}</p>
-                  </div>
-                  <p className="text-[11px] text-[#e9bcb6]/70 truncate mt-0.5">{comm.theoryExcerpt}</p>
-                </div>
+                  <span className="material-symbols-outlined text-lg">chevron_left</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleScroll('next')}
+                  disabled={!canScrollRight}
+                  aria-label="Next trending shows"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[#e5e2e1] hover:bg-[#2a2a2a] transition-all disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50914]"
+                >
+                  <span className="material-symbols-outlined text-lg">chevron_right</span>
+                </button>
               </div>
-            ))}
+
+              <a
+                href="/discover"
+                className="text-xs sm:text-sm font-semibold text-[#ffb4aa] hover:text-[#e5e2e1] flex items-center gap-0.5 transition-colors"
+              >
+                <span>Explore All Hubs</span>
+                <span className="material-symbols-outlined text-base">chevron_right</span>
+              </a>
+            </div>
           </div>
+
+          {/* Carousel Viewport Container */}
+          {isLoading ? (
+            /* Carousel Loading Skeletons */
+            <div className="flex items-stretch gap-4 sm:gap-5 overflow-hidden py-2 px-1">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div
+                  key={i}
+                  className="w-[220px] sm:w-[240px] md:w-[260px] aspect-[2/3] rounded-2xl bg-[#201f1f] border border-[#353534] animate-pulse shrink-0"
+                />
+              ))}
+            </div>
+          ) : error && topFiveTrending.length === 0 ? (
+            /* Carousel Error State */
+            <div className="p-8 rounded-2xl bg-[#201f1f] border border-[#353534] text-center">
+              <p className="text-sm text-[#e9bcb6] mb-3">Unable to load trending TV shows right now.</p>
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="px-4 py-2 rounded-xl bg-[#e50914] text-white font-bold text-xs hover:bg-[#b2000d] transition-all cursor-pointer"
+              >
+                Retry
+              </button>
+            </div>
+          ) : topFiveTrending.length === 0 ? (
+            <div className="p-8 rounded-2xl bg-[#201f1f] border border-[#353534] text-center text-xs text-[#e9bcb6]">
+              No trending shows available.
+            </div>
+          ) : (
+            /* Accessible, Scrollable Horizontal Carousel */
+            <div
+              ref={carouselRef}
+              onKeyDown={handleKeyDown}
+              tabIndex={0}
+              role="region"
+              aria-label="Top 5 Trending TV Shows Carousel"
+              className="flex items-stretch gap-4 sm:gap-5 overflow-x-auto scroll-smooth scrollbar-none snap-x snap-mandatory py-2 px-1 focus:outline-none focus:ring-1 focus:ring-[#e50914]/40 rounded-2xl"
+            >
+              {topFiveTrending.map((show, index) => (
+                <ShowCard
+                  key={show.id}
+                  show={show}
+                  viewMode="carousel"
+                  rank={index + 1}
+                  isBookmarked={Boolean(bookmarkedIds[show.id])}
+                  onToggleBookmark={onToggleBookmark}
+                  onJoinHub={onJoinHub}
+                  onViewReviews={onViewReviews}
+                />
+              ))}
+            </div>
+          )}
         </section>
 
         {/* ========================================================================= */}
@@ -720,7 +965,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
             {/* Secondary Right Sidebar: Synchronized Watch Parties & Fandom Leaderboard */}
             <aside className="lg:col-span-4 flex flex-col gap-4">
-              {/* Live Watchroom Card */}
+              {/* Synchronized Watchroom Card */}
               <div className="p-5 rounded-2xl bg-[#201f1f] border border-[#353534] shadow-md">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -731,7 +976,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <h3 className="font-bold text-sm text-[#e5e2e1]">Synchronized Watchroom</h3>
                   </div>
                   <span className="text-[10px] text-[#ffb4aa] font-extrabold uppercase tracking-wider">
-                    LIVE SYNC
+                    FEATURE
                   </span>
                 </div>
 
@@ -739,56 +984,33 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div
                   className="w-full h-36 rounded-xl bg-cover bg-center relative mb-3 overflow-hidden flex items-end p-3 border border-[#353534]"
                   style={{
-                    backgroundImage:
-                      "url('https://lh3.googleusercontent.com/aida-public/AB6AXuC9F6Sw1dw8igYJ_YmloMq8jaWuPi1qb6f2dEa9eG_lHMvpDcyXmtoiMA59uye2wWmbns4UXTWvPvlxv7ShOVmGy-lk_awtcLAIzuAx1ClhLzXGU7E5ZghMdQHwsZvWMQzH0a9njdRK4HJszCalRprjSCjiMX2pmhjOn98W7FRULzm_-lYOR1RQ9SsBiOKVJHdZDHHCzABcCYJijN6yu8dwCG_YBNhaKXAbb2FUovNFT4flB5UP14sFgQ')",
+                    backgroundImage: `url('${featuredShow?.backdropPath || featuredShow?.posterPath || DEFAULT_BACKDROP}')`,
                   }}
                 >
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0e0e0e] via-[#0e0e0e]/40 to-transparent" />
                   <div className="relative z-10">
                     <span className="text-[10px] text-[#ffb4aa] font-extrabold uppercase">
-                      S4: Episode 9 Climax
+                      {featuredShow ? `${featuredShow.title} Hub` : 'Community Room'}
                     </span>
-                    <h4 className="text-sm font-bold text-[#e5e2e1]">The Piggyback Re-watch</h4>
+                    <h4 className="text-sm font-bold text-[#e5e2e1] line-clamp-1">
+                      {featuredShow ? `Sync Playback: ${featuredShow.title}` : 'Live Watch Party'}
+                    </h4>
                   </div>
                 </div>
 
-                {/* Progress Bar */}
-                <div className="mb-3">
-                  <div className="flex justify-between text-[11px] text-[#e9bcb6]/80 mb-1">
-                    <span>Current Time: 01:42:10</span>
-                    <span className="font-semibold text-[#e5e2e1]">1,842 in room</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-[#0e0e0e] rounded-full overflow-hidden">
-                    <div className="h-full bg-[#e50914] rounded-full" style={{ width: '72%' }} />
-                  </div>
-                </div>
-
-                {/* Attendees */}
-                <div className="flex -space-x-2 overflow-hidden mb-4 py-1">
-                  <img
-                    className="inline-block h-7 w-7 rounded-full ring-2 ring-[#201f1f] object-cover"
-                    alt="Attendee"
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuBt7hEDyYZFIBGkJUUC9DTT6htRCgyoXJ19VF8IJMOVqHqXBYR9DjQzNtIshLelYiJVz8A3kaKH5-H2WR7CwuHJcpmy-1MlSPHoeKxR2rrhirjQ5YjJ9wwp0r8iu9u8_TzOvZzV1VDLnpSfEhHBsL359e2JQDdbUI6yrF9U9_4LlxBUl_6OUptr0398IVVcyjSZL9JCTRflioOhr6kOuJpWUI3f_o0aPcesMtZufsX3EQJW9km_PghEzw"
-                  />
-                  <img
-                    className="inline-block h-7 w-7 rounded-full ring-2 ring-[#201f1f] object-cover"
-                    alt="Attendee"
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuBhSLE8ajVaE9HOSjXVSwcGt60yMpavFWtNKpOfWkbCaCHdE4r_PNWVpj5qSHTmyq0aYxhNVxnoJbERoj-dtyzI7rWGZoAVrzq_hrXgGjicQcKELQL39HI-sJlzO_ZbXlxMLmZpLILAhvlTKbKnkGNUM0pR57OBgF34DkiMgRMstyRmVMhacqj-mrxb6H7lJswRWITWC0YqHxIFy5RoWJ1PamDb52ijgdLPK8p0L-U29w15lI01KAifuQ"
-                  />
-                  <img
-                    className="inline-block h-7 w-7 rounded-full ring-2 ring-[#201f1f] object-cover"
-                    alt="Attendee"
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuDw1IlOiXKYLeXUYTgEJI7L5KTKr4FCM0VKA2J3MtrOEIvqoEVdp13NB71mcovoD5BPuHQITu2EtagWPvECCE2rRg3lYpVh9W6asbsnwQ2EmTvcM_LlBG8Y_8zMTemSgNI4aYVuqOZfkSaptlr1F8xIHZx7zlmHoHK82Zqwp4UsI00M80NTCfV99UjcEJSAX31sH1E0O3QpvPg39Tx7A_5u8n5af7xEZJ5K6kBEPPxzVrA0haDQH1YB-w"
-                  />
-                  <div className="flex items-center justify-center h-7 w-7 rounded-full ring-2 ring-[#201f1f] bg-[#2a2a2a] text-[10px] font-bold text-[#e5e2e1]">
-                    +1.8k
-                  </div>
-                </div>
+                {/* Feature Description */}
+                <p className="text-xs text-[#e9bcb6]/80 mb-4 leading-relaxed">
+                  Sync playback down to the millisecond with fellow fans, featuring real-time commentary and spoiler-protected chat channels.
+                </p>
 
                 <button
                   type="button"
                   onClick={() => {
-                    setNotificationToast?.('Synchronized watchroom joined: Playback aligned with 1,842 viewers.');
+                    setNotificationToast?.(
+                      featuredShow
+                        ? `Synchronized watchroom initialized for "${featuredShow.title}".`
+                        : 'Synchronized watchroom session initialized.'
+                    );
                   }}
                   className="w-full py-2.5 rounded-xl bg-[#e50914] text-white font-bold text-xs flex items-center justify-center gap-2 hover:bg-[#b2000d] transition-all shadow-md active:scale-95 cursor-pointer"
                 >
@@ -877,8 +1099,17 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
             </div>
 
-            {/* Filter Tabs */}
-            <div className="flex items-center p-1 rounded-xl bg-[#201f1f] border border-[#353534]/50 shadow-inner">
+            <div className="flex items-center gap-3 flex-wrap">
+              <a
+                href="/reviews"
+                className="text-xs sm:text-sm font-semibold text-[#ffb4aa] hover:text-[#e5e2e1] flex items-center gap-0.5 transition-colors"
+              >
+                <span>Explore All Reviews</span>
+                <span className="material-symbols-outlined text-base">chevron_right</span>
+              </a>
+
+              {/* Filter Tabs */}
+              <div className="flex items-center p-1 rounded-xl bg-[#201f1f] border border-[#353534]/50 shadow-inner">
               <button
                 type="button"
                 onClick={() => setActiveReviewTab('week')}
@@ -914,6 +1145,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               </button>
             </div>
           </div>
+        </div>
 
           {/* 3-Column Reviews Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

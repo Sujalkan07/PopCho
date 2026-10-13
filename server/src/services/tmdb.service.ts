@@ -11,6 +11,24 @@ import type {
   ReviewsResponse
 } from '../types/tmdb.types.js';
 
+/**
+ * Structured error class preserving HTTP status codes and error categories
+ * without exposing internal credentials or raw stack traces.
+ */
+export class TmdbApiError extends Error {
+  public readonly status: number;
+  public readonly code: string;
+  public readonly endpoint: string;
+
+  constructor(message: string, status: number = 500, code: string = 'TMDB_ERROR', endpoint: string = '') {
+    super(message);
+    this.name = 'TmdbApiError';
+    this.status = status;
+    this.code = code;
+    this.endpoint = endpoint;
+  }
+}
+
 // Simple in-memory cache with TTL (10 minutes default)
 interface CacheEntry<T> {
   data: T;
@@ -57,7 +75,7 @@ const GENRE_MAP: Record<number, string> = {
   10751: 'Family',
   14: 'Fantasy',
   36: 'History',
-  27: 'Horror',
+  60: 'Horror',
   10402: 'Music',
   9648: 'Mystery',
   10749: 'Romance',
@@ -77,9 +95,9 @@ const GENRE_MAP: Record<number, string> = {
   10768: 'War & Politics'
 };
 
-const DEFAULT_POSTER =
+export const DEFAULT_POSTER =
   'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80';
-const DEFAULT_BACKDROP =
+export const DEFAULT_BACKDROP =
   'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=1920&q=80';
 
 export function getTmdbImageUrl(
@@ -89,55 +107,175 @@ export function getTmdbImageUrl(
   if (!path) {
     return size === 'original' || size === 'w780' ? DEFAULT_BACKDROP : DEFAULT_POSTER;
   }
-  if (path.startsWith('http')) return path;
-  return `${config.tmdb.imageBaseUrl}/${size}${path}`;
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${config.tmdb.imageBaseUrl}/${size}${cleanPath}`;
 }
 
+/**
+ * Fetch data from upstream TMDB API with unified auth, timeout, clean caching,
+ * and robust error status mapping.
+ */
 export async function fetchTmdb<T>(
   endpoint: string,
   params: Record<string, string | number | undefined> = {},
   ttlMs: number = 10 * 60 * 1000
 ): Promise<T> {
-  const url = new URL(`${config.tmdb.baseUrl}${endpoint}`);
-  
-  // Clean up params
-  Object.entries(params).forEach(([key, val]) => {
-    if (val !== undefined && val !== null && val !== '') {
-      url.searchParams.set(key, String(val));
-    }
-  });
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
-  const cacheKey = url.toString();
+  // 1. Check credential configuration
+  const authMode = config.tmdb.authMode;
+  if (authMode === 'none') {
+    throw new TmdbApiError(
+      'TMDB credentials are not configured on the server. Please configure TMDB_READ_ACCESS_TOKEN or TMDB_API_KEY.',
+      503,
+      'TMDB_NOT_CONFIGURED',
+      cleanEndpoint
+    );
+  }
+
+  // 2. Build parameter search list and construct clean, credential-free cache key
+  const searchParams = new URLSearchParams();
+  const sortedKeys = Object.keys(params).sort();
+  for (const key of sortedKeys) {
+    const val = params[key];
+    if (val !== undefined && val !== null && val !== '') {
+      searchParams.set(key, String(val));
+    }
+  }
+
+  const queryString = searchParams.toString();
+  const cacheKey = `tmdb:${cleanEndpoint}${queryString ? `?${queryString}` : ''}`;
   const cached = cache.get<T>(cacheKey);
   if (cached) {
     return cached;
   }
 
-  // Set authentication headers
-  const headers: Record<string, string> = {
-    'Accept': 'application/json',
-    'Content-Type': 'application/json'
-  };
-
-  if (config.tmdb.readAccessToken) {
-    headers['Authorization'] = `Bearer ${config.tmdb.readAccessToken}`;
-  } else if (config.tmdb.apiKey) {
-    url.searchParams.set('api_key', config.tmdb.apiKey);
-  } else {
-    throw new Error('TMDB credentials missing in server environment (TMDB_READ_ACCESS_TOKEN or TMDB_API_KEY required).');
-  }
-
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers
+  // 3. Construct URL with endpoint and parameters
+  const requestUrl = new URL(`${config.tmdb.baseUrl}${cleanEndpoint}`);
+  searchParams.forEach((value, key) => {
+    requestUrl.searchParams.set(key, value);
   });
 
-  if (!response.ok) {
-    const errorBody = await response.text().catch(() => '');
-    throw new Error(`TMDB API request failed [${response.status} ${response.statusText}]: ${errorBody}`);
+  // 4. Apply single authentication mechanism with strict token > key precedence
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'User-Agent': 'PopCho-Server/1.0',
+  };
+
+  if (authMode === 'token') {
+    headers['Authorization'] = `Bearer ${config.tmdb.readAccessToken}`;
+  } else if (authMode === 'key') {
+    requestUrl.searchParams.set('api_key', config.tmdb.apiKey);
   }
 
-  const data = (await response.json()) as T;
+  // 5. Execute HTTP request with bounded timeout (8s)
+  let response: Response;
+  try {
+    response = await fetch(requestUrl.toString(), {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (err: unknown) {
+    const isAbort =
+      err instanceof Error &&
+      (err.name === 'TimeoutError' || err.name === 'AbortError' || err.message.includes('timeout'));
+
+    if (isAbort) {
+      throw new TmdbApiError(
+        'TMDB upstream request timed out after 8 seconds.',
+        504,
+        'TMDB_TIMEOUT',
+        cleanEndpoint
+      );
+    }
+
+    const errorMsg = err instanceof Error ? err.message : 'Network error';
+    console.error(`[TMDB] Network error connecting to ${cleanEndpoint}: ${errorMsg}`);
+    throw new TmdbApiError(
+      'Unable to connect to TMDB upstream service. Please check network connectivity.',
+      502,
+      'TMDB_NETWORK_ERROR',
+      cleanEndpoint
+    );
+  }
+
+  // 6. Handle non-2xx status codes
+  if (!response.ok) {
+    let upstreamMessage = '';
+    try {
+      const errorJson = (await response.json()) as { status_message?: string };
+      if (errorJson && typeof errorJson.status_message === 'string') {
+        upstreamMessage = errorJson.status_message;
+      }
+    } catch {
+      // Non-JSON error body
+    }
+
+    const status = response.status;
+
+    if (status === 401 || status === 403) {
+      console.error(`[TMDB] Auth failure (${status}) on ${cleanEndpoint}: ${upstreamMessage}`);
+      throw new TmdbApiError(
+        'TMDB upstream authentication rejected the configured server credential.',
+        401,
+        'TMDB_AUTH_FAILED',
+        cleanEndpoint
+      );
+    }
+
+    if (status === 404) {
+      throw new TmdbApiError(
+        upstreamMessage || `Resource not found on TMDB: ${cleanEndpoint}`,
+        404,
+        'TMDB_NOT_FOUND',
+        cleanEndpoint
+      );
+    }
+
+    if (status === 429) {
+      console.warn(`[TMDB] Rate limit exceeded on ${cleanEndpoint}`);
+      throw new TmdbApiError(
+        'TMDB rate limit exceeded. Please try again shortly.',
+        429,
+        'TMDB_RATE_LIMITED',
+        cleanEndpoint
+      );
+    }
+
+    if (status >= 500) {
+      console.error(`[TMDB] Upstream server error (${status}) on ${cleanEndpoint}: ${upstreamMessage}`);
+      throw new TmdbApiError(
+        'TMDB upstream service is currently unavailable.',
+        502,
+        'TMDB_UPSTREAM_ERROR',
+        cleanEndpoint
+      );
+    }
+
+    throw new TmdbApiError(
+      upstreamMessage || `TMDB request failed with status ${status}`,
+      status,
+      'TMDB_REQUEST_FAILED',
+      cleanEndpoint
+    );
+  }
+
+  // 7. Parse JSON response
+  let data: T;
+  try {
+    data = (await response.json()) as T;
+  } catch {
+    throw new TmdbApiError(
+      'Received invalid JSON response from TMDB.',
+      502,
+      'TMDB_INVALID_JSON',
+      cleanEndpoint
+    );
+  }
+
+  // 8. Cache only verified successful responses
   cache.set<T>(cacheKey, data, ttlMs);
   return data;
 }
@@ -233,8 +371,8 @@ export class TmdbService {
 
     return {
       results,
-      total: rawData.total_results,
-      page: rawData.page
+      total: rawData.total_results || 0,
+      page: rawData.page || page
     };
   }
 
@@ -258,8 +396,8 @@ export class TmdbService {
 
     return {
       results,
-      total: rawData.total_results,
-      page: rawData.page
+      total: rawData.total_results || 0,
+      page: rawData.page || page
     };
   }
 
@@ -290,8 +428,8 @@ export class TmdbService {
 
     return {
       results,
-      total: rawData.total_results,
-      page: rawData.page
+      total: rawData.total_results || 0,
+      page: rawData.page || page
     };
   }
 
@@ -302,7 +440,7 @@ export class TmdbService {
     id: string | number,
     mediaType: 'movie' | 'tv' = 'tv'
   ): Promise<NormalizedMediaItem & { rawDetails: RawTmdbDetails }> {
-    const cleanId = String(id).replace(/^(tv-|movie-)/, '');
+    const cleanId = String(id).replace(/^(tv-|movie-)/, '').trim();
     const raw = await fetchTmdb<RawTmdbDetails>(
       `/${mediaType}/${cleanId}`,
       { append_to_response: 'credits,similar,recommendations' }
@@ -359,7 +497,7 @@ export class TmdbService {
     cast: { id: number; name: string; character: string; profilePath: string }[];
     crew: { id: number; name: string; job: string; department: string }[];
   }> {
-    const cleanId = String(id).replace(/^(tv-|movie-)/, '');
+    const cleanId = String(id).replace(/^(tv-|movie-)/, '').trim();
     const raw = await fetchTmdb<{
       id: number;
       cast: RawTmdbCastMember[];
@@ -405,7 +543,7 @@ export class TmdbService {
       runtime?: number;
     }[];
   }> {
-    const cleanId = String(tvId).replace(/^(tv-|movie-)/, '');
+    const cleanId = String(tvId).replace(/^(tv-|movie-)/, '').trim();
     const raw = await fetchTmdb<RawTmdbSeason>(`/tv/${cleanId}/season/${seasonNumber}`);
 
     return {
@@ -433,7 +571,7 @@ export class TmdbService {
     id: string | number,
     mediaType: 'movie' | 'tv' = 'tv'
   ): Promise<NormalizedMediaItem[]> {
-    const cleanId = String(id).replace(/^(tv-|movie-)/, '');
+    const cleanId = String(id).replace(/^(tv-|movie-)/, '').trim();
     const raw = await fetchTmdb<{ results: RawTmdbMedia[] }>(
       `/${mediaType}/${cleanId}/similar`
     );
@@ -451,7 +589,7 @@ export class TmdbService {
     mediaType: 'movie' | 'tv' = 'tv',
     page: number = 1
   ): Promise<ReviewsResponse> {
-    const cleanId = String(id).replace(/^(tv-|movie-)/, '');
+    const cleanId = String(id).replace(/^(tv-|movie-)/, '').trim();
     const rawData = await fetchTmdb<RawTmdbReviewResponse>(
       `/${mediaType}/${cleanId}/reviews`,
       { page }

@@ -5,7 +5,6 @@ import { getPopularMovies, getTrendingMovies } from '../services/tmdb/movies';
 import { searchMedia } from '../services/tmdb/search';
 import { ShowCard } from '../components/directory/ShowCard';
 import { GENRE_FILTERS } from '../components/directory/DirectoryControls';
-import { MOCK_SHOWS } from '../services/tmdb/mockData';
 import { listCommunities, type CommunityRecord } from '../services/community/api';
 
 interface CommunitiesPageProps {
@@ -69,7 +68,7 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
     };
   }, []);
 
-  // Initial load: fetch trending & popular TV + Movies and merge with flagship Stitch communities
+  // Initial load: fetch authentic trending & popular TV + Movies directly from TMDB
   const loadInitialCatalog = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -84,16 +83,6 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
       const seenKeys = new Set<string>();
       const combined: MediaItem[] = [];
 
-      // 1. Add flagship Stitch show communities first (preserving high-fidelity Stitch data)
-      for (const item of MOCK_SHOWS) {
-        const key = `${item.mediaType}-${item.tmdbId || item.id}`;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          combined.push(item);
-        }
-      }
-
-      // 2. Append authentic live TMDB items
       for (const item of [...trendTv, ...popTv, ...trendMovies, ...popMovies]) {
         const key = `${item.mediaType}-${item.tmdbId || item.id}`;
         if (!seenKeys.has(key)) {
@@ -106,11 +95,9 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
       setPage(1);
       setHasMore(true);
     } catch (err: unknown) {
-      console.error('Failed to load communities directory catalog:', err);
-      // Fallback gracefully to MOCK_SHOWS so users can explore even if backend is offline
-      setCatalogItems(MOCK_SHOWS);
+      console.error('Failed to load communities directory catalog from TMDB:', err);
       const msg = err instanceof Error ? err.message : 'Unable to connect to TMDB directory service.';
-      setError(`${msg} Displaying curated core show hubs.`);
+      setError(`${msg} Click retry to fetch live shows.`);
     } finally {
       setLoading(false);
     }
@@ -293,81 +280,7 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
         <div className="absolute -top-32 left-1/4 w-[600px] h-[340px] bg-gradient-to-br from-[#e50914]/15 via-[#b2000d]/5 to-transparent blur-3xl pointer-events-none -z-10 rounded-full" />
         <div className="absolute top-10 right-10 w-[420px] h-[280px] bg-gradient-to-bl from-[#ffb4aa]/10 via-transparent to-transparent blur-3xl pointer-events-none -z-10 rounded-full" />
 
-        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-12 flex flex-col gap-6">
-          {/* Top Meta Breadcrumb & Live Stats Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <nav className="flex items-center gap-2 text-xs font-semibold text-[#e9bcb6]/80">
-              <a
-                href="/"
-                className="hover:text-white transition-colors flex items-center gap-1"
-              >
-                <span className="material-symbols-outlined text-sm">home</span>
-                POPCHO
-              </a>
-              <span className="text-[#353534]">/</span>
-              <span className="text-[#e9bcb6]/60">Directory</span>
-              <span className="text-[#353534]">/</span>
-              <span className="text-[#e5e2e1] font-bold">All Shows &amp; Communities</span>
-            </nav>
-
-            <div className="flex items-center gap-3 self-start sm:self-auto">
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-[#201f1f] text-[#e5e2e1] text-xs font-semibold border border-[#353534]">
-                <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse" />
-                <span>
-                  {catalogItems.length > 0
-                    ? `${catalogItems.length.toLocaleString()} Shows Indexed • Live TMDB Sync`
-                    : 'Syncing Catalog...'}
-                </span>
-              </div>
-              <div className="hidden md:flex items-center gap-1.5 text-[#e9bcb6]/70 text-xs">
-                <span className="material-symbols-outlined text-sm text-[#e50914]">sync</span>
-                <span>Refreshed live</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Hero Header & Catalog Overview */}
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pt-1 pb-2">
-            <div className="flex flex-col gap-2 max-w-3xl">
-              <div className="flex items-center gap-2.5">
-                <span className="px-2.5 py-0.5 rounded bg-[#e50914]/20 text-[#e50914] text-[11px] font-extrabold uppercase tracking-wider border border-[#e50914]/30">
-                  Full Catalog Index
-                </span>
-                <span className="text-[#e9bcb6]/70 text-xs font-medium">
-                  • Over 1,200 Verified Show Universes
-                </span>
-              </div>
-
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-[#e5e2e1] tracking-tight leading-tight">
-                Explore All Show Communities &amp; Hubs
-              </h1>
-
-              <p className="text-sm sm:text-base text-[#e9bcb6]/85 max-w-2xl leading-relaxed">
-                Browse dedicated fan hubs, live synchronized watchrooms, deep-dive lore threads, and verified critical reviews across every modern television franchise.
-              </p>
-            </div>
-
-            {/* Quick Platform Stats Pills */}
-            <div className="flex items-center gap-3 flex-wrap shrink-0">
-              <div className="px-4 py-3 rounded-2xl bg-[#201f1f] border border-[#353534] flex flex-col min-w-[120px] shadow-md">
-                <span className="text-xl sm:text-2xl text-[#e5e2e1] font-extrabold">
-                  {catalogItems.length > 0 ? `${catalogItems.length.toLocaleString()}+` : '1,200+'}
-                </span>
-                <span className="text-xs text-[#e9bcb6]/70 font-medium">Total Show Hubs</span>
-              </div>
-              <div className="px-4 py-3 rounded-2xl bg-[#201f1f] border border-[#353534] flex flex-col min-w-[120px] shadow-md">
-                <span className="text-xl sm:text-2xl text-[#e5e2e1] font-extrabold">
-                  {displayedItems.length}
-                </span>
-                <span className="text-xs text-[#e9bcb6]/70 font-medium">Matching Catalog</span>
-              </div>
-              <div className="px-4 py-3 rounded-2xl bg-[#201f1f] border border-[#353534] flex flex-col min-w-[120px] shadow-md">
-                <span className="text-xl sm:text-2xl text-[#e50914] font-extrabold">98.4%</span>
-                <span className="text-xs text-[#e9bcb6]/70 font-medium">Active Moderation</span>
-              </div>
-            </div>
-          </div>
-
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-12 flex flex-col gap-6">
           {/* Directory Controls Box */}
           <div className="flex flex-col gap-4 bg-[#1c1b1b] p-4 sm:p-5 rounded-2xl border border-[#353534] shadow-xl">
             {/* Search Row */}

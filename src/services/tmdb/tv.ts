@@ -1,11 +1,26 @@
 import { fetchFromBackend } from './client';
 import type { MediaItem, CastMember } from './types';
 
-export async function getTrendingTvShows(page: number = 1): Promise<MediaItem[]> {
+// In-memory cache for trending TV shows to prevent redundant network requests
+let cachedTrendingTv: { data: MediaItem[]; timestamp: number } | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export async function getTrendingTvShows(page: number = 1, forceRefresh: boolean = false): Promise<MediaItem[]> {
+  if (forceRefresh) {
+    cachedTrendingTv = null;
+  } else if (page === 1 && cachedTrendingTv && Date.now() - cachedTrendingTv.timestamp < CACHE_TTL_MS) {
+    return cachedTrendingTv.data;
+  }
+
   const data = await fetchFromBackend<{ results: MediaItem[]; total: number; page: number }>(
     '/trending',
     { mediaType: 'tv', timeWindow: 'week', page }
   );
+
+  if (page === 1 && Array.isArray(data.results)) {
+    cachedTrendingTv = { data: data.results, timestamp: Date.now() };
+  }
+
   return data.results;
 }
 

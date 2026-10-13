@@ -23,35 +23,142 @@ export class CommunityService {
   }
 
   /**
-   * Seed standard default channels for a community if they do not exist
+   * Seed authentic show-specific channels for a community using verified TMDB metadata
    */
-  async ensureDefaultChannels(communityId: string, showTitle: string) {
-    const defaultChannels = [
-      {
-        name: 'theories',
-        slug: 'theories',
-        description: `Season clues, audio decodes, and lore mythology for ${showTitle}`,
-        type: 'TEXT',
-      },
-      {
-        name: 'general',
-        slug: 'general',
-        description: `General fan chatter, cast news, and community discussions`,
-        type: 'TEXT',
-      },
-      {
-        name: 'episodes',
-        slug: 'episodes',
-        description: `Live reactions, episode recaps, and scene breakdowns`,
-        type: 'TEXT',
-      },
-      {
-        name: 'fan-art',
-        slug: 'fan-art',
-        description: `Fan creations, artwork, edits, and soundtrack appreciation`,
-        type: 'TEXT',
-      },
-    ];
+  async ensureDefaultChannels(
+    communityId: string,
+    showTitle: string,
+    mediaType: string = 'tv',
+    details?: { genres?: string[]; numberOfSeasons?: number; tagline?: string }
+  ) {
+    const isTv = mediaType === 'tv';
+    const isStrangerThings = showTitle.toLowerCase().includes('stranger things');
+    const isSciFiOrMystery =
+      details?.genres?.some((g) => {
+        const lower = g.toLowerCase();
+        return (
+          lower.includes('sci-fi') ||
+          lower.includes('mystery') ||
+          lower.includes('thriller') ||
+          lower.includes('fantasy')
+        );
+      }) || false;
+
+    let defaultChannels: Array<{ name: string; slug: string; description: string; type: string }>;
+
+    if (isStrangerThings) {
+      defaultChannels = [
+        {
+          name: 'upside-down-theories',
+          slug: 'upside-down-theories',
+          description: 'Season 5 clues, audio reverse spectrograms, and gate mythology',
+          type: 'TEXT',
+        },
+        {
+          name: 'general-hawkins',
+          slug: 'general-hawkins',
+          description: 'General fan chatter, cast news, and meetups',
+          type: 'TEXT',
+        },
+        {
+          name: 'eddie-memorial',
+          slug: 'eddie-memorial',
+          description: 'Guitar solos, Hellfire Club appreciation & Kas theories',
+          type: 'TEXT',
+        },
+        {
+          name: 'episode-reactions',
+          slug: 'episode-reactions',
+          description: 'Live reactions to episodes and teasers',
+          type: 'TEXT',
+        },
+        {
+          name: 'memes-and-art',
+          slug: 'memes-and-art',
+          description: 'Share artwork, edits, and memes',
+          type: 'TEXT',
+        },
+      ];
+    } else if (isTv) {
+      const showPrefix = showTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .slice(0, 16)
+        .replace(/-$/, '');
+
+      defaultChannels = [
+        {
+          name: `general-${showPrefix || 'chat'}`,
+          slug: 'general',
+          description: `General fan chatter, cast news, and community meetups for ${showTitle}`,
+          type: 'TEXT',
+        },
+        {
+          name: isSciFiOrMystery ? `${showPrefix}-lore-theories` : `${showPrefix}-theories`,
+          slug: 'theories',
+          description: `Deep-dive storyline theories, clues, and character motives for ${showTitle}`,
+          type: 'TEXT',
+        },
+        {
+          name: 'episode-reactions',
+          slug: 'episodes',
+          description: `Live episode reactions, scene breakdowns, and season recaps`,
+          type: 'TEXT',
+        },
+        {
+          name: 'spoilers-and-leaks',
+          slug: 'spoilers',
+          description: `Spoiler-masked room for leaks, endings, and future developments`,
+          type: 'TEXT',
+        },
+        {
+          name: 'fan-art-and-media',
+          slug: 'fan-art',
+          description: `Fan creations, artwork, edits, soundtracks, and memes for ${showTitle}`,
+          type: 'TEXT',
+        },
+      ];
+    } else {
+      // Feature Movies
+      const moviePrefix = showTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .slice(0, 16)
+        .replace(/-$/, '');
+
+      defaultChannels = [
+        {
+          name: `${moviePrefix || 'movie'}-discussion`,
+          slug: 'general',
+          description: `Cinema reactions, reviews, and general discussion for ${showTitle}`,
+          type: 'TEXT',
+        },
+        {
+          name: 'plot-theories',
+          slug: 'theories',
+          description: `Storyline analysis, lore, and sequel predictions for ${showTitle}`,
+          type: 'TEXT',
+        },
+        {
+          name: 'ending-breakdown',
+          slug: 'ending',
+          description: `Spoiler-masked discussion of the climax, post-credits, and ending`,
+          type: 'TEXT',
+        },
+        {
+          name: 'cinematography-soundtrack',
+          slug: 'production',
+          description: `Visuals, score, directing, and behind-the-scenes discussion`,
+          type: 'TEXT',
+        },
+        {
+          name: 'fan-art-and-edits',
+          slug: 'fan-art',
+          description: `Fan creations, posters, wallpapers, and edits for ${showTitle}`,
+          type: 'TEXT',
+        },
+      ];
+    }
 
     for (const ch of defaultChannels) {
       await prisma.channel.upsert({
@@ -68,7 +175,10 @@ export class CommunityService {
           description: ch.description,
           type: ch.type,
         },
-        update: {},
+        update: {
+          name: ch.name,
+          description: ch.description,
+        },
       });
     }
   }
@@ -104,7 +214,13 @@ export class CommunityService {
     if (community) {
       // Ensure default channels exist
       if (community.channels.length === 0) {
-        await this.ensureDefaultChannels(community.id, community.title);
+        let details: any = null;
+        try {
+          details = await tmdbService.getDetails(tmdbId, mediaType);
+        } catch {
+          // ignore
+        }
+        await this.ensureDefaultChannels(community.id, community.title, mediaType, details);
         community = await prisma.community.findUnique({
           where: { id: community.id },
           include: {
@@ -121,14 +237,15 @@ export class CommunityService {
     let description = options.fallbackOverview || '';
     let posterPath = options.fallbackPoster || '';
     let backdropPath = options.fallbackBackdrop || '';
+    let tmdbDetails: any = null;
 
     try {
-      const details = await tmdbService.getDetails(tmdbId, mediaType);
-      if (details) {
-        title = details.title || title;
-        description = details.overview || description;
-        posterPath = details.posterPath || posterPath;
-        backdropPath = details.backdropPath || backdropPath;
+      tmdbDetails = await tmdbService.getDetails(tmdbId, mediaType);
+      if (tmdbDetails) {
+        title = tmdbDetails.title || title;
+        description = tmdbDetails.overview || description;
+        posterPath = tmdbDetails.posterPath || posterPath;
+        backdropPath = tmdbDetails.backdropPath || backdropPath;
       }
     } catch (err) {
       console.warn(`[CommunityService] Failed to fetch TMDB details for ${mediaType}/${tmdbId}, using fallbacks:`, err);
@@ -165,8 +282,8 @@ export class CommunityService {
       },
     });
 
-    // 4. Seed default channels
-    await this.ensureDefaultChannels(community.id, community.title);
+    // 4. Seed authentic show-specific channels
+    await this.ensureDefaultChannels(community.id, community.title, mediaType, tmdbDetails);
 
     // Reload with created channels
     const refreshed = await prisma.community.findUnique({

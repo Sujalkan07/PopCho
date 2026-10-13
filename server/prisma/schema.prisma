@@ -85,3 +85,72 @@ model Reaction {
   @@unique([messageId, userId, emoji])
   @@index([messageId])
 }
+
+model Review {
+  id           String          @id @default(cuid())
+  tmdbId       Int
+  mediaType    String          @default("tv")
+  showTitle    String
+  showPoster   String?
+  showBackdrop String?
+  headline     String
+  content      String          @db.Text
+  rating       Float           @default(5.0)
+  essayType    String          @default("Comprehensive Analysis")
+  categoryTag  String          @default("Review")
+  hasSpoiler   Boolean         @default(false)
+  userId       String
+  userName     String
+  userAvatar   String?
+  userRole     String?         @default("Community Critic")
+  helpfulCount Int             @default(0)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  votes        ReviewVote[]
+  comments     ReviewComment[]
+  bookmarks    ReviewBookmark[]
+
+  @@index([tmdbId, mediaType])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([helpfulCount])
+}
+
+model ReviewVote {
+  id        String   @id @default(cuid())
+  reviewId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId])
+  @@index([reviewId])
+}
+
+model ReviewComment {
+  id         String   @id @default(cuid())
+  reviewId   String
+  userId     String
+  userName   String
+  userAvatar String?
+  content    String   @db.Text
+  createdAt  DateTime @default(now())
+
+  review     Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId, createdAt])
+}
+
+model ReviewBookmark {
+  id        String   @id @default(cuid())
+  reviewId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, userId])
+  @@index([reviewId])
+}

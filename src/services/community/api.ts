@@ -47,7 +47,16 @@ export interface MessageRecord {
   reactions: ReactionRecord[];
 }
 
-const BASE_URL = '/api/communities';
+function getCommunityApiBaseUrl(): string {
+  const envUrl = (import.meta.env.VITE_API_URL || '').trim();
+  if (!envUrl) return '/api/communities';
+  const cleanUrl = envUrl.replace(/\/+$/, '');
+  if (cleanUrl.endsWith('/api/communities')) return cleanUrl;
+  if (cleanUrl.endsWith('/api')) return `${cleanUrl}/communities`;
+  return `${cleanUrl}/api/communities`;
+}
+
+const BASE_URL = getCommunityApiBaseUrl();
 
 // Helper for development identity headers
 export function getDevUserHeaders(): Record<string, string> {

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { MediaItem, ChatMessage, CommunityChannel } from '../../services/tmdb/types';
-import { MOCK_CHANNELS } from '../../services/tmdb/mockData';
 import {
   lookupCommunity,
   getMessages,
@@ -22,6 +21,27 @@ import {
   isSocketConnected as checkSocketConnected,
 } from '../../services/community/socket';
 
+function generateShowFallbackChannels(show: MediaItem): CommunityChannel[] {
+  const isTv = show.mediaType === 'tv';
+  const prefix = show.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 16).replace(/-$/, '') || 'hub';
+  if (isTv) {
+    return [
+      { id: 'ch-general', communityId: 'default', name: `general-${prefix}`, topic: `General fan chatter, cast news, and meetups for ${show.title}`, isSpoilerSafe: false },
+      { id: 'ch-theories', communityId: 'default', name: `${prefix}-theories`, topic: `Deep-dive theories, hidden clues, and lore analysis for ${show.title}`, isSpoilerSafe: true },
+      { id: 'ch-episodes', communityId: 'default', name: 'episode-reactions', topic: `Live reactions, episode recaps, and season breakdowns for ${show.title}`, isSpoilerSafe: true },
+      { id: 'ch-spoilers', communityId: 'default', name: 'spoilers-and-leaks', topic: `Spoiler-masked room for leaks, endings, and future developments`, isSpoilerSafe: true },
+      { id: 'ch-fanart', communityId: 'default', name: 'fan-art-and-media', topic: `Fan creations, artwork, edits, and soundtrack appreciation`, isSpoilerSafe: false },
+    ];
+  }
+  return [
+    { id: 'ch-movie', communityId: 'default', name: `${prefix}-discussion`, topic: `Cinema reactions, reviews, and general discussion for ${show.title}`, isSpoilerSafe: false },
+    { id: 'ch-theories', communityId: 'default', name: 'plot-theories', topic: `Storyline analysis, lore, and sequel predictions for ${show.title}`, isSpoilerSafe: true },
+    { id: 'ch-ending', communityId: 'default', name: 'ending-breakdown', topic: `Spoiler-masked discussion of the climax, post-credits, and ending`, isSpoilerSafe: true },
+    { id: 'ch-cinematography', communityId: 'default', name: 'cinematography-soundtrack', topic: `Visuals, score, directing, and behind-the-scenes discussion`, isSpoilerSafe: false },
+    { id: 'ch-fanart', communityId: 'default', name: 'fan-art-and-edits', topic: `Fan creations, posters, wallpapers, and edits for ${show.title}`, isSpoilerSafe: false },
+  ];
+}
+
 interface CommunityChatWorkspaceProps {
   show: MediaItem;
   initialChannelId?: string;
@@ -35,8 +55,9 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'chat' | 'theories' | 'reviews'>('chat');
   const [communityRecord, setCommunityRecord] = useState<CommunityRecord | null>(null);
-  const [channels, setChannels] = useState<CommunityChannel[]>(MOCK_CHANNELS);
-  const [activeChannelId, setActiveChannelId] = useState<string>(initialChannelId || MOCK_CHANNELS[0].id);
+  const initialChannels = generateShowFallbackChannels(show);
+  const [channels, setChannels] = useState<CommunityChannel[]>(initialChannels);
+  const [activeChannelId, setActiveChannelId] = useState<string>(initialChannelId || initialChannels[0]?.id || 'ch-general');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [messagesError, setMessagesError] = useState<string | null>(null);
@@ -318,7 +339,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
     }
   };
 
-  const activeChannel = channels.find((c) => c.id === activeChannelId) || channels[0] || MOCK_CHANNELS[0];
+  const activeChannel = channels.find((c) => c.id === activeChannelId) || channels[0] || initialChannels[0];
 
   return (
     <div className="w-full min-h-screen bg-[#131313] text-[#e5e2e1] flex flex-col animate-fadeIn">

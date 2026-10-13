@@ -1,12 +1,16 @@
 import { io, Socket } from 'socket.io-client';
 import { getDevUserHeaders, type MessageRecord, type ReactionRecord } from './api';
 
-let socket: Socket | null = null;
+const rawEnvUrl = (import.meta.env.VITE_API_URL || '').trim();
+const normalizedSocketUrl = rawEnvUrl ? rawEnvUrl.replace(/\/api.*$/, '').replace(/\/+$/, '') : '';
 
 const SOCKET_URL =
-  typeof window !== 'undefined' && window.location.hostname === 'localhost'
+  normalizedSocketUrl ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
     ? 'http://localhost:5000'
-    : '';
+    : '');
+
+let socket: Socket | null = null;
 
 export function getCommunitySocket(): Socket {
   if (!socket) {
