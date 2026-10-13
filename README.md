@@ -1,94 +1,50 @@
-# PopCho 🍿
+git # PopCho
 
-> A Netflix-inspired cinematic fan community and media discovery platform where users can discover movies and TV shows, join dedicated fandom communities, chat in real time, and publish critical deep dives.
+## About
+PopCho is an entertainment-focused web application where users can discover movies and television shows, publish reviews, and participate in fan communities and discussions. The platform integrates metadata from The Movie Database (TMDB) with a dedicated backend service to support community-driven discussions and media exploration.
 
----
+> **Note:** PopCho is an ongoing project under active development.
 
-## 🚀 Overview
+## Current Features
+- **Media Discovery:** Browse trending and popular movies and TV series retrieved through a secure TMDB backend proxy.
+- **Title Inspection:** Search titles and inspect verified metadata including release dates, genres, official ratings, and overviews.
+- **Community Reviews:** Publish long-form reviews with custom star scores, spoiler tags, and review categories.
+- **Review Interactions:** Engage with community reviews through helpful voting and fan commentary threads.
+- **Fandom Hubs & Real-Time Chat:** Access show-specific communities with topic-based chat channels powered by WebSockets.
 
-PopCho combines modern streaming-platform aesthetics with community-driven fandom engagement. Powered by real-time data from **The Movie Database (TMDB)** and a dedicated **PostgreSQL** backend, PopCho offers high-signal discussion, live watchrooms, and authentic user reviews.
+## Tech Stack
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS
+- **Backend:** Node.js, Express, TypeScript, Socket.IO
+- **Database:** PostgreSQL, Prisma ORM
+- **External API:** The Movie Database (TMDB) API
 
----
+## Getting Started
 
-## ✨ Features (In Progress)
+### Prerequisites
+- Node.js (v18 or higher)
+- PostgreSQL database instance
 
-- **Cinematic Top 5 Trending Hero Slider**: Dynamic showcase of trending titles featuring multi-stop scrim gradients, autoplay with pause-on-hover, keyboard accessibility, and an interactive thumbnail selector.
-- **Live TMDB Media Discovery**: Search and inspect official movie and TV series metadata, credits, artwork, and international reviews via a secure backend proxy.
-- **Community Reviews & Critique Corps**: 
-  - Publish rich essays, thematic breakdowns, and season finale verdicts.
-  - Star ratings, spoiler warnings, and instant live title lookup.
-  - Interactive community engagement: helpful voting, fan commentary threads, and bookmarking.
-  - Live aggregated **Top Critics Leaderboard**.
-- **Fandom Communities & Real-Time Chat**: Dedicated show hubs with multi-channel discussions and live emoji reactions powered by **Socket.IO**.
-
----
-
-## 🛠️ Tech Stack
-
-- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
-- **Backend**: Node.js, Express, TypeScript, Socket.IO
-- **Database & ORM**: PostgreSQL, Prisma ORM
-- **External Data**: TMDB (The Movie Database) API
-
----
-
-## 🏁 Getting Started
-
-### 1. Prerequisites
-- **Node.js** (v18 or higher)
-- **npm** (or pnpm / yarn)
-- **PostgreSQL** instance running locally or hosted
-
----
-
-### 2. Installation
-
-1. **Clone the repository**:
+### Installation
+1. Clone the repository:
    ```bash
    git clone https://github.com/your-username/PopCho.git
    cd PopCho
    ```
 
-2. **Install frontend dependencies**:
+2. Install root and frontend dependencies:
    ```bash
    npm install
    ```
 
-3. **Install backend dependencies**:
+3. Install backend dependencies:
    ```bash
    cd server
    npm install
    cd ..
    ```
 
----
-
-### 3. Environment Configuration
-
-1. **Backend Environment** (`server/.env`):
-   Copy `server/.env.example` to `server/.env` and supply your database URL and TMDB credentials:
-   ```env
-   PORT=5000
-   NODE_ENV=development
-   CLIENT_URL=http://localhost:5173
-   DATABASE_URL=postgresql://user:password@localhost:5432/popcho
-   JWT_SECRET=your_jwt_secret_here
-
-   # TMDB Server Credentials (Bearer token preferred)
-   TMDB_READ_ACCESS_TOKEN=your_tmdb_read_access_token
-   TMDB_API_KEY=your_tmdb_api_key_optional
-   ```
-
-2. **Frontend Environment** (`.env`):
-   ```env
-   VITE_API_URL=http://localhost:5000
-   ```
-
----
-
-### 4. Database Setup
-
-From the `server` directory, sync the Prisma schema with your database:
+### Database Setup
+Push the Prisma schema to your PostgreSQL database:
 ```bash
 cd server
 npm run prisma:push
@@ -96,48 +52,50 @@ npm run prisma:generate
 cd ..
 ```
 
----
+### Running Locally
+Run the backend and frontend services in separate terminal windows:
 
-### 5. Running Locally
-
-Start both the backend server and frontend development server:
-
-- **Terminal 1 (Backend)**:
+- **Backend:**
   ```bash
   cd server
   npm run dev
-  # Server runs on http://localhost:5000
   ```
+  The API server runs on `http://localhost:5000`.
 
-- **Terminal 2 (Frontend)**:
+- **Frontend:**
   ```bash
   npm run dev
-  # Vite dev server runs on http://localhost:5173
   ```
+  The client application runs on `http://localhost:5173`.
 
----
+## Environment Variables
+PopCho uses environment variables for service endpoints, database connections, and API credentials. Copy the provided sample files and fill in your values.
 
-## 📁 Project Structure
-
-```text
-PopCho/
-├── src/                      # Frontend source
-│   ├── components/           # UI components (Hero, Chat, Directory, Reviews)
-│   ├── pages/                # Page views (HomePage, Discover, Reviews, Communities)
-│   ├── services/             # API services (tmdb, community, review)
-│   └── styles/               # CSS tokens and styling
-├── server/                   # Backend Express server
-│   ├── prisma/               # Prisma schema and migrations
-│   └── src/
-│       ├── db/               # Prisma client connection
-│       ├── routes/           # REST endpoints (tmdb, community, review)
-│       ├── services/         # Business logic & TMDB proxy
-│       └── socket.ts         # Real-time WebSocket handlers
-└── README.md
+### Frontend (`.env`)
+```env
+VITE_API_URL=http://localhost:5000
 ```
 
----
+### Backend (`server/.env`)
+```env
+PORT=5000
+NODE_ENV=development
+CLIENT_URL=http://localhost:5173
+DATABASE_URL=postgresql://username:password@localhost:5432/popcho
+JWT_SECRET=your_jwt_secret_here
 
-## 📝 License
+# TMDB Credentials (v4 Read Access Token or v3 API Key)
+TMDB_READ_ACCESS_TOKEN=your_tmdb_read_access_token
+TMDB_API_KEY=your_tmdb_api_key
+```
 
-This project is open-source and available under the [MIT License](LICENSE).
+*Note: Never commit your `.env` files or real credentials to version control.*
+
+## Project Status
+PopCho is currently under active development. Core browsing, review submission, and community chat functionality are implemented, with ongoing work focused on data consistency, state handling, and interface refinement.
+
+## Future Plans
+- Complete user registration and personal profile workflows
+- Watchlist management and custom user lists
+- Enhanced search filters and recommendation engines
+- Expanded moderation and notification systems
