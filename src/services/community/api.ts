@@ -58,26 +58,58 @@ function getCommunityApiBaseUrl(): string {
 
 const BASE_URL = getCommunityApiBaseUrl();
 
-// Helper for development identity headers
+let cachedAuthToken: string | null = null;
+
+export function setCommunityAuthToken(token: string | null) {
+  cachedAuthToken = token;
+}
+
+// Helper for identity headers (supports Supabase Bearer JWT & dev fallback)
 export function getDevUserHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+
+  if (cachedAuthToken) {
+    headers['Authorization'] = `Bearer ${cachedAuthToken}`;
+  } else {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+          const item = localStorage.getItem(key);
+          if (item) {
+            const parsed = JSON.parse(item);
+            if (parsed && parsed.access_token) {
+              headers['Authorization'] = `Bearer ${parsed.access_token}`;
+              break;
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore localStorage parse issues
+    }
+  }
+
   const savedUser = localStorage.getItem('popcho_user');
   if (savedUser) {
     try {
       const parsed = JSON.parse(savedUser);
-      return {
-        'x-user-id': parsed.id || 'user_fan_01',
-        'x-user-name': parsed.name || 'You (Fan)',
-        'x-user-avatar': parsed.avatar || '',
-        'x-user-role': parsed.role || 'Community Member',
-      };
+      headers['x-user-id'] = parsed.id || 'user_fan_01';
+      headers['x-user-name'] = parsed.name || 'You (Fan)';
+      headers['x-user-avatar'] = parsed.avatar || '';
+      headers['x-user-role'] = parsed.role || 'Community Member';
+      return headers;
     } catch {
       // fallback
     }
   }
-  return {
-    'x-user-id': 'user_fan_01',
-    'x-user-name': 'You (Fan)',
-  };
+
+  if (!headers['Authorization']) {
+    headers['x-user-id'] = 'user_fan_01';
+    headers['x-user-name'] = 'You (Fan)';
+  }
+
+  return headers;
 }
 
 export async function listCommunities(params: {
@@ -271,6 +303,23 @@ export async function toggleReaction(
   );
   if (!res.ok) {
     throw new Error(`Failed to toggle reaction (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function getUserHubs(customHeaders?: Record<string, string>): Promise<{
+  hubs: CommunityRecord[];
+  count: number;
+}> {
+  const res = await fetch(`${BASE_URL}/user/hubs`, {
+    headers: {
+      Accept: 'application/json',
+      ...getDevUserHeaders(),
+      ...customHeaders,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to retrieve user hubs (${res.status})`);
   }
   return res.json();
 }

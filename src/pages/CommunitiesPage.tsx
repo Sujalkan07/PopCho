@@ -73,17 +73,31 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const [trendTv, popTv, trendMovies, popMovies] = await Promise.all([
+      const settled = await Promise.allSettled([
         getTrendingTvShows(1),
         getPopularTvShows(1),
         getTrendingMovies(1),
         getPopularMovies(1),
       ]);
 
+      const trendTv = settled[0].status === 'fulfilled' ? settled[0].value : [];
+      const popTv = settled[1].status === 'fulfilled' ? settled[1].value : [];
+      const trendMovies = settled[2].status === 'fulfilled' ? settled[2].value : [];
+      const popMovies = settled[3].status === 'fulfilled' ? settled[3].value : [];
+
+      const batch = [...trendTv, ...popTv, ...trendMovies, ...popMovies];
+
+      if (batch.length === 0) {
+        const firstRejection = settled.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+        const msg = firstRejection?.reason instanceof Error ? firstRejection.reason.message : 'Unable to connect to TMDB directory service.';
+        setError(`${msg} Click retry to fetch live shows.`);
+        return;
+      }
+
       const seenKeys = new Set<string>();
       const combined: MediaItem[] = [];
 
-      for (const item of [...trendTv, ...popTv, ...trendMovies, ...popMovies]) {
+      for (const item of batch) {
         const key = `${item.mediaType}-${item.tmdbId || item.id}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
@@ -113,11 +127,13 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
     setLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const [newTv, newMovies] = await Promise.all([
+      const settled = await Promise.allSettled([
         getPopularTvShows(nextPage),
         getPopularMovies(nextPage),
       ]);
 
+      const newTv = settled[0].status === 'fulfilled' ? settled[0].value : [];
+      const newMovies = settled[1].status === 'fulfilled' ? settled[1].value : [];
       const batch = [...newTv, ...newMovies];
       if (batch.length === 0) {
         setHasMore(false);

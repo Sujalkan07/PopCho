@@ -5,6 +5,8 @@ import type { MediaItem, CastMember } from './types';
 let cachedTrendingTv: { data: MediaItem[]; timestamp: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+let cachedPopularTv: { data: MediaItem[]; timestamp: number } | null = null;
+
 export async function getTrendingTvShows(page: number = 1, forceRefresh: boolean = false): Promise<MediaItem[]> {
   if (forceRefresh) {
     cachedTrendingTv = null;
@@ -17,19 +19,32 @@ export async function getTrendingTvShows(page: number = 1, forceRefresh: boolean
     { mediaType: 'tv', timeWindow: 'week', page }
   );
 
-  if (page === 1 && Array.isArray(data.results)) {
-    cachedTrendingTv = { data: data.results, timestamp: Date.now() };
+  const items = Array.isArray(data?.results) ? data.results : [];
+  if (page === 1 && items.length > 0) {
+    cachedTrendingTv = { data: items, timestamp: Date.now() };
   }
 
-  return data.results;
+  return items;
 }
 
-export async function getPopularTvShows(page: number = 1): Promise<MediaItem[]> {
+export async function getPopularTvShows(page: number = 1, forceRefresh: boolean = false): Promise<MediaItem[]> {
+  if (forceRefresh) {
+    cachedPopularTv = null;
+  } else if (page === 1 && cachedPopularTv && Date.now() - cachedPopularTv.timestamp < CACHE_TTL_MS) {
+    return cachedPopularTv.data;
+  }
+
   const data = await fetchFromBackend<{ results: MediaItem[]; total: number; page: number }>(
     '/popular',
     { mediaType: 'tv', page }
   );
-  return data.results;
+
+  const items = Array.isArray(data?.results) ? data.results : [];
+  if (page === 1 && items.length > 0) {
+    cachedPopularTv = { data: items, timestamp: Date.now() };
+  }
+
+  return items;
 }
 
 export async function getTvShowDetails(id: string | number): Promise<MediaItem> {

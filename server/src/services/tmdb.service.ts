@@ -112,9 +112,12 @@ export function getTmdbImageUrl(
   return `${config.tmdb.imageBaseUrl}/${size}${cleanPath}`;
 }
 
+// In-flight request deduplication map to prevent stampedes on concurrent upstream queries
+const inFlightRequests = new Map<string, Promise<unknown>>();
+
 /**
  * Fetch data from upstream TMDB API with unified auth, timeout, clean caching,
- * and robust error status mapping.
+ * in-flight request deduplication, and robust error status mapping.
  */
 export async function fetchTmdb<T>(
   endpoint: string,
@@ -151,55 +154,79 @@ export async function fetchTmdb<T>(
     return cached;
   }
 
-  // 3. Construct URL with endpoint and parameters
-  const requestUrl = new URL(`${config.tmdb.baseUrl}${cleanEndpoint}`);
-  searchParams.forEach((value, key) => {
-    requestUrl.searchParams.set(key, value);
-  });
-
-  // 4. Apply single authentication mechanism with strict token > key precedence
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    'User-Agent': 'PopCho-Server/1.0',
-  };
-
-  if (authMode === 'token') {
-    headers['Authorization'] = `Bearer ${config.tmdb.readAccessToken}`;
-  } else if (authMode === 'key') {
-    requestUrl.searchParams.set('api_key', config.tmdb.apiKey);
+  // 3. In-flight request deduplication: reuse active promise if same request is already executing
+  const existingInFlight = inFlightRequests.get(cacheKey);
+  if (existingInFlight) {
+    return existingInFlight as Promise<T>;
   }
 
-  // 5. Execute HTTP request with bounded timeout (8s)
-  let response: Response;
-  try {
-    response = await fetch(requestUrl.toString(), {
-      method: 'GET',
-      headers,
-      signal: AbortSignal.timeout(8000),
+  const fetchPromise = (async (): Promise<T> => {
+    // Construct URL with endpoint and parameters
+    const requestUrl = new URL(`${config.tmdb.baseUrl}${cleanEndpoint}`);
+    searchParams.forEach((value, key) => {
+      requestUrl.searchParams.set(key, value);
     });
-  } catch (err: unknown) {
-    const isAbort =
-      err instanceof Error &&
-      (err.name === 'TimeoutError' || err.name === 'AbortError' || err.message.includes('timeout'));
 
-    if (isAbort) {
+    // Apply single authentication mechanism with strict token > key precedence
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'User-Agent': 'PopCho-Server/1.0',
+    };
+
+    if (authMode === 'token') {
+      headers['Authorization'] = `Bearer ${config.tmdb.readAccessToken}`;
+    } else if (authMode === 'key') {
+      requestUrl.searchParams.set('api_key', config.tmdb.apiKey);
+    }
+
+    // Execute HTTP request with bounded timeout (15s) and automatic retry on transient socket resets
+    let response: Response | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await fetch(requestUrl.toString(), {
+          method: 'GET',
+          headers,
+          signal: AbortSignal.timeout(15000),
+        });
+        break;
+      } catch (err: unknown) {
+        const isAbort =
+          err instanceof Error &&
+          (err.name === 'TimeoutError' || err.name === 'AbortError' || err.message.includes('timeout'));
+
+        if (isAbort && attempt === 2) {
+          throw new TmdbApiError(
+            'TMDB upstream request timed out after 15 seconds.',
+            504,
+            'TMDB_TIMEOUT',
+            cleanEndpoint
+          );
+        }
+
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+          continue;
+        }
+
+        const errorMsg = err instanceof Error ? err.message : 'Network error';
+        console.error(`[TMDB] Network error connecting to ${cleanEndpoint}: ${errorMsg}`);
+        throw new TmdbApiError(
+          'Unable to connect to TMDB upstream service. Please check network connectivity.',
+          502,
+          'TMDB_NETWORK_ERROR',
+          cleanEndpoint
+        );
+      }
+    }
+
+    if (!response) {
       throw new TmdbApiError(
-        'TMDB upstream request timed out after 8 seconds.',
-        504,
-        'TMDB_TIMEOUT',
+        'Unable to connect to TMDB upstream service.',
+        502,
+        'TMDB_NETWORK_ERROR',
         cleanEndpoint
       );
     }
-
-    const errorMsg = err instanceof Error ? err.message : 'Network error';
-    console.error(`[TMDB] Network error connecting to ${cleanEndpoint}: ${errorMsg}`);
-    throw new TmdbApiError(
-      'Unable to connect to TMDB upstream service. Please check network connectivity.',
-      502,
-      'TMDB_NETWORK_ERROR',
-      cleanEndpoint
-    );
-  }
 
   // 6. Handle non-2xx status codes
   if (!response.ok) {
@@ -275,9 +302,17 @@ export async function fetchTmdb<T>(
     );
   }
 
-  // 8. Cache only verified successful responses
-  cache.set<T>(cacheKey, data, ttlMs);
-  return data;
+    // 8. Cache only verified successful responses
+    cache.set<T>(cacheKey, data, ttlMs);
+    return data;
+  })();
+
+  inFlightRequests.set(cacheKey, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightRequests.delete(cacheKey);
+  }
 }
 
 export function normalizeMediaItem(

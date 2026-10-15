@@ -495,6 +495,35 @@ export class CommunityService {
       joinedAt: membership?.joinedAt || null,
     };
   }
+
+  /**
+   * Retrieve communities joined by a specific user (My Hubs)
+   */
+  async getUserHubs(userId: string) {
+    const memberships = await prisma.membership.findMany({
+      where: { userId },
+      orderBy: { joinedAt: 'desc' },
+      include: {
+        community: {
+          include: {
+            channels: { take: 4, orderBy: { createdAt: 'asc' } },
+            _count: {
+              select: { memberships: true, channels: true },
+            },
+          },
+        },
+      },
+    });
+
+    return memberships.map((m) => ({
+      ...m.community,
+      membershipRole: m.role,
+      joinedAt: m.joinedAt,
+      memberCount: m.community._count.memberships,
+      channelCount: m.community._count.channels,
+      isMember: true,
+    }));
+  }
 }
 
 export const communityService = new CommunityService();

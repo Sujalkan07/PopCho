@@ -1,3 +1,4 @@
+import './dns-resolver.js';
 import dns from 'node:dns';
 import http from 'node:http';
 import express, { type Request, type Response, type NextFunction } from 'express';
@@ -6,16 +7,12 @@ import { config, getSafeConfigDiagnostics } from './config.js';
 import tmdbRoutes from './routes/tmdb.routes.js';
 import communityRoutes from './routes/community.routes.js';
 import reviewRoutes from './routes/review.routes.js';
+import authRoutes from './routes/auth.routes.js';
+import watchlistRoutes from './routes/watchlist.routes.js';
+import { authMiddleware } from './middleware/auth.middleware.js';
 import { initSocketServer } from './socket.js';
 import prisma from './db/prisma.js';
 import { tmdbService } from './services/tmdb.service.js';
-
-// Prioritize IPv4 resolution to prevent connect timeouts on dual-stack hosts
-try {
-  dns.setDefaultResultOrder('ipv4first');
-} catch {
-  // Ignore if unsupported in environment
-}
 
 const app = express();
 
@@ -35,6 +32,7 @@ app.use(
       if (!origin) return callback(null, true);
       if (
         allowedOrigins.includes(origin) ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
         (origin.endsWith('.vercel.app') && origin.includes('popcho'))
       ) {
         return callback(null, true);
@@ -143,10 +141,15 @@ app.get('/api/health/tmdb', async (_req: Request, res: Response) => {
   }
 });
 
+// Global Authentication Middleware
+app.use(authMiddleware);
+
 // Mount Routes
 app.use('/api/tmdb', tmdbRoutes);
 app.use('/api/communities', communityRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/watchlist', watchlistRoutes);
 
 // Global Error Handler
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

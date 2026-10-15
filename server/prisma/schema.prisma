@@ -154,3 +154,29 @@ model ReviewBookmark {
   @@unique([reviewId, userId])
   @@index([reviewId])
 }
+
+model Profile {
+  id          String   @id // Supabase user ID (UUID)
+  email       String?
+  displayName String?
+  username    String?
+  avatarUrl   String?
+  role        String?  @default("Community Member")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([username])
+}
+
+model Watchlist {
+  id         String   @id @default(cuid())
+  userId     String   // Supabase user ID
+  tmdbId     Int
+  mediaType  String   // 'movie' | 'tv'
+  title      String
+  posterPath String?
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, tmdbId, mediaType])
+  @@index([userId])
+}

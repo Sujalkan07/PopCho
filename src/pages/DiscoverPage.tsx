@@ -55,12 +55,17 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const [trendTv, trendMovies, popTv, popMovies] = await Promise.all([
+      const settled = await Promise.allSettled([
         getTrendingTvShows(1),
         getTrendingMovies(1),
         getPopularTvShows(1),
         getPopularMovies(1),
       ]);
+
+      const trendTv = settled[0].status === 'fulfilled' ? settled[0].value : [];
+      const trendMovies = settled[1].status === 'fulfilled' ? settled[1].value : [];
+      const popTv = settled[2].status === 'fulfilled' ? settled[2].value : [];
+      const popMovies = settled[3].status === 'fulfilled' ? settled[3].value : [];
 
       // Combine trending
       const combinedTrending = [...trendTv, ...trendMovies];
@@ -69,6 +74,14 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({
       // Combine popular
       const combinedPopular = [...popTv, ...popMovies];
       setPopularItems(combinedPopular);
+
+      // If all upstream queries failed, surface the error
+      if (combinedTrending.length === 0 && combinedPopular.length === 0) {
+        const firstRejection = settled.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+        const msg = firstRejection?.reason instanceof Error ? firstRejection.reason.message : 'Unable to load TMDB discovery feed. Please ensure the backend is running.';
+        setError(msg);
+        return;
+      }
 
       // Unique discovery catalog pool
       const seen = new Set<string>();
@@ -103,10 +116,12 @@ export const DiscoverPage: React.FC<DiscoverPageProps> = ({
     setLoadingMore(true);
     try {
       const nextPage = page + 1;
-      const [newTv, newMovies] = await Promise.all([
+      const settled = await Promise.allSettled([
         getPopularTvShows(nextPage),
         getPopularMovies(nextPage),
       ]);
+      const newTv = settled[0].status === 'fulfilled' ? settled[0].value : [];
+      const newMovies = settled[1].status === 'fulfilled' ? settled[1].value : [];
       const newBatch = [...newTv, ...newMovies];
 
       if (newBatch.length === 0) {

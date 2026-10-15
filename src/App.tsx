@@ -10,13 +10,21 @@ import { RequestHubModal } from './components/directory/RequestHubModal';
 import { ReviewsModal } from './components/reviews/ReviewsModal';
 import { JoinHubModal } from './components/chat/JoinHubModal';
 import { CommunityChatWorkspace } from './components/chat/CommunityChatWorkspace';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AuthModal } from './components/auth/AuthModal';
+import { WatchlistPage } from './pages/WatchlistPage';
+import { HubsPage } from './pages/HubsPage';
 import type { MediaItem } from './services/tmdb/types';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export function AppContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [notificationToast, setNotificationToast] = useState<string | null>(null);
 
-  // Bookmarked show IDs with localStorage persistence
+  const { user, getAuthHeaders } = useAuth();
+
+  // Bookmarked show IDs with localStorage & database persistence
   const [bookmarkedIds, setBookmarkedIds] = useState<Record<string | number, boolean>>(() => {
     try {
       const saved = localStorage.getItem('popcho_bookmarks');
@@ -33,10 +41,41 @@ export function AppContent() {
   const [activeWorkspaceShow, setActiveWorkspaceShow] = useState<MediaItem | null>(null);
   const [activeWorkspaceChannelId, setActiveWorkspaceChannelId] = useState<string | undefined>(undefined);
 
-  // Toggle bookmark handler
-  const handleToggleBookmark = (showId: string | number) => {
+  // Sync saved items from database when user is authenticated
+  useEffect(() => {
+    if (!user) return;
+    let isMounted = true;
+    fetch(`${API_BASE_URL}/api/watchlist/ids`, {
+      headers: {
+        Accept: 'application/json',
+        ...getAuthHeaders(),
+      },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted || !data?.items) return;
+        setBookmarkedIds((prev) => {
+          const updated = { ...prev };
+          for (const item of data.items) {
+            updated[item.tmdbId] = true;
+          }
+          return updated;
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user, getAuthHeaders]);
+
+  // Toggle bookmark handler with server persistence
+  const handleToggleBookmark = (showId: string | number, mediaItem?: MediaItem) => {
+    const numericId = Number(showId);
+    const willBookmark = !bookmarkedIds[showId];
+
     setBookmarkedIds((prev) => {
-      const next = { ...prev, [showId]: !prev[showId] };
+      const next = { ...prev, [showId]: willBookmark };
       try {
         localStorage.setItem('popcho_bookmarks', JSON.stringify(next));
       } catch {
@@ -44,6 +83,38 @@ export function AppContent() {
       }
       return next;
     });
+
+    if (user && !isNaN(numericId)) {
+      fetch(`${API_BASE_URL}/api/watchlist/toggle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          tmdbId: numericId,
+          mediaType: mediaItem?.mediaType || 'tv',
+          title: mediaItem?.title || `Show #${showId}`,
+          posterPath: mediaItem?.posterPath || null,
+        }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error('Failed to update watchlist');
+          return res.json();
+        })
+        .then((result) => {
+          setNotificationToast(
+            result.inWatchlist ? 'Added to your Watchlist' : 'Removed from your Watchlist'
+          );
+        })
+        .catch(() => {
+          // Revert on network failure
+          setBookmarkedIds((prev) => ({ ...prev, [showId]: !willBookmark }));
+          setNotificationToast('Could not sync Watchlist change. Please try again.');
+        });
+    } else if (!user && willBookmark) {
+      setNotificationToast('Saved locally. Sign in to sync across devices!');
+    }
   };
 
   // Toast auto-clear
@@ -163,6 +234,25 @@ export function AppContent() {
             path="/community-reviews"
             element={<Navigate to="/reviews" replace />}
           />
+          <Route
+            path="/watchlist"
+            element={
+              <WatchlistPage
+                onJoinHub={(s) => setSelectedJoinShow(s)}
+                onViewReviews={(s) => setSelectedReviewShow(s)}
+              />
+            }
+          />
+          <Route
+            path="/hubs"
+            element={
+              <HubsPage
+                onJoinHub={(s) => setSelectedJoinShow(s)}
+                onViewReviews={(s) => setSelectedReviewShow(s)}
+                setNotificationToast={setNotificationToast}
+              />
+            }
+          />
           {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -172,6 +262,8 @@ export function AppContent() {
       <Footer />
 
       {/* Global Modals */}
+      <AuthModal />
+
       <RequestHubModal
         isOpen={isRequestModalOpen}
         onClose={() => setIsRequestModalOpen(false)}
@@ -203,7 +295,9 @@ export function AppContent() {
 export function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </BrowserRouter>
   );
 }

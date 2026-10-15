@@ -17,6 +17,7 @@ import {
   type CriticRanking,
   type ReviewCommentItem,
 } from '../services/review/api';
+import { useAuth } from '../contexts/AuthContext';
 
 interface CommunityReviewsPageProps {
   onJoinHub?: (show: MediaItem) => void;
@@ -58,6 +59,8 @@ function formatTimeAgo(isoDate: string): string {
 export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
   setNotificationToast,
 }) => {
+  const { user, openAuthModal } = useAuth();
+
   // Reviews state from real PostgreSQL backend
   const [reviews, setReviews] = useState<PopchoReview[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(true);
@@ -98,7 +101,11 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
   const [showSearchSuggestions, setShowSearchSuggestions] = useState<MediaItem[]>([]);
   const [isSearchingShows, setIsSearchingShows] = useState(false);
   const [showSuggestionsOpen, setShowSuggestionsOpen] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number>(-1);
+  const [searchShowsError, setSearchShowsError] = useState<string | null>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSequenceRef = useRef<number>(0);
+  const searchCacheRef = useRef<Map<string, MediaItem[]>>(new Map());
 
   // Live TMDB Title Review Inspector state
   const [tmdbLookupId, setTmdbLookupId] = useState('');
@@ -299,10 +306,12 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
     }
   };
 
-  // Debounced show title search in composer
+  // Debounced show title search in composer with sequence counter and cache
   const handleComposerShowInputChange = (value: string) => {
     setComposerShowTitle(value);
     setComposerTmdbId(null);
+    setSearchShowsError(null);
+    setSelectedSuggestionIndex(-1);
 
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
@@ -312,38 +321,95 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
     if (clean.length < 2) {
       setShowSearchSuggestions([]);
       setShowSuggestionsOpen(false);
+      setIsSearchingShows(false);
+      return;
+    }
+
+    // Check memory cache first to avoid redundant requests
+    const cached = searchCacheRef.current.get(clean.toLowerCase());
+    if (cached) {
+      setShowSearchSuggestions(cached);
+      setShowSuggestionsOpen(true);
+      setIsSearchingShows(false);
       return;
     }
 
     setIsSearchingShows(true);
+    const thisSequence = ++searchSequenceRef.current;
+
     searchTimeoutRef.current = setTimeout(async () => {
       try {
         const res = await searchMedia(clean);
-        setShowSearchSuggestions(res.results.slice(0, 5));
+        // Discard out-of-order older responses
+        if (thisSequence !== searchSequenceRef.current) return;
+        const validResults = (res.results || []).slice(0, 6);
+        searchCacheRef.current.set(clean.toLowerCase(), validResults);
+        setShowSearchSuggestions(validResults);
         setShowSuggestionsOpen(true);
-      } catch {
+        setSearchShowsError(null);
+      } catch (err: unknown) {
+        if (thisSequence !== searchSequenceRef.current) return;
+        const msg = err instanceof Error ? err.message : 'Unable to search titles';
+        setSearchShowsError(msg);
         setShowSearchSuggestions([]);
       } finally {
-        setIsSearchingShows(false);
+        if (thisSequence === searchSequenceRef.current) {
+          setIsSearchingShows(false);
+        }
       }
-    }, 300);
+    }, 280);
+  };
+
+  // Keyboard navigation for search suggestions
+  const handleShowInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSuggestionsOpen || showSearchSuggestions.length === 0) {
+      if (e.key === 'ArrowDown' && showSearchSuggestions.length > 0) {
+        setShowSuggestionsOpen(true);
+        setSelectedSuggestionIndex(0);
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedSuggestionIndex((prev) =>
+        prev < showSearchSuggestions.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedSuggestionIndex((prev) =>
+        prev > 0 ? prev - 1 : showSearchSuggestions.length - 1
+      );
+    } else if (e.key === 'Enter') {
+      if (selectedSuggestionIndex >= 0 && selectedSuggestionIndex < showSearchSuggestions.length) {
+        e.preventDefault();
+        handleSelectShowSuggestion(showSearchSuggestions[selectedSuggestionIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setShowSuggestionsOpen(false);
+      setSelectedSuggestionIndex(-1);
+    }
   };
 
   const handleSelectShowSuggestion = (show: MediaItem) => {
     setComposerShowTitle(show.title);
-    setComposerTmdbId(Number(show.id) || 0);
+    setComposerTmdbId(Number(show.id) || show.tmdbId || 0);
     setComposerMediaType(show.mediaType === 'movie' ? 'movie' : 'tv');
     setComposerPoster(show.posterPath || null);
     setComposerBackdrop(show.backdropPath || show.featuredImage || null);
     setShowSuggestionsOpen(false);
+    setSelectedSuggestionIndex(-1);
+    setSearchShowsError(null);
   };
 
-  // Publish a new review
+  // Publish a new review with auto-resolution guarantee
   const handlePublishReview = async (e: React.FormEvent) => {
     e.preventDefault();
     setComposerError(null);
 
-    if (!composerShowTitle.trim()) {
+    const titleInput = composerShowTitle.trim();
+    if (!titleInput) {
       setComposerError('Please select or specify a show title.');
       return;
     }
@@ -355,15 +421,43 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
       setComposerError('Please provide your full critical review text.');
       return;
     }
+    if (!user) {
+      setComposerError('Please sign in to publish your review.');
+      openAuthModal('signin');
+      return;
+    }
 
     setIsSubmittingReview(true);
     try {
+      // Auto-resolve TMDB show metadata if user typed without selecting suggestion
+      let finalTmdbId = composerTmdbId;
+      let finalPoster = composerPoster;
+      let finalBackdrop = composerBackdrop;
+      let finalMediaType = composerMediaType;
+      let finalTitle = titleInput;
+
+      if (!finalTmdbId || finalTmdbId === 0) {
+        try {
+          const lookup = await searchMedia(titleInput, 1);
+          if (lookup.results && lookup.results.length > 0) {
+            const match = lookup.results[0];
+            finalTmdbId = Number(match.id) || match.tmdbId || 0;
+            finalPoster = match.posterPath || null;
+            finalBackdrop = match.backdropPath || match.featuredImage || null;
+            finalMediaType = match.mediaType === 'movie' ? 'movie' : 'tv';
+            finalTitle = match.title || finalTitle;
+          }
+        } catch {
+          // Graceful fallback to user input
+        }
+      }
+
       const created = await createPopchoReview({
-        tmdbId: composerTmdbId || 0,
-        mediaType: composerMediaType,
-        showTitle: composerShowTitle.trim(),
-        showPoster: composerPoster || undefined,
-        showBackdrop: composerBackdrop || undefined,
+        tmdbId: finalTmdbId || 0,
+        mediaType: finalMediaType,
+        showTitle: finalTitle,
+        showPoster: finalPoster || undefined,
+        showBackdrop: finalBackdrop || undefined,
         headline: composerHeadline.trim(),
         content: composerBody.trim(),
         rating: composerRating,
@@ -382,6 +476,7 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
       setComposerHeadline('');
       setComposerBody('');
       setComposerSpoiler(false);
+      setSelectedSuggestionIndex(-1);
       setNotificationToast?.('Your critical deep dive has been published to PopCho!');
       fetchCritics();
     } catch (err: unknown) {
@@ -1237,8 +1332,13 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
                     required
                     value={composerShowTitle}
                     onChange={(e) => handleComposerShowInputChange(e.target.value)}
+                    onKeyDown={handleShowInputKeyDown}
+                    onFocus={() => {
+                      if (showSearchSuggestions.length > 0) setShowSuggestionsOpen(true);
+                    }}
                     placeholder="Type to search official title (e.g. Severance, Arcane, Breaking Bad)..."
-                    className="w-full bg-[#0e0e0e] text-[#e5e2e1] placeholder:text-[#e9bcb6]/50 text-xs sm:text-sm pl-10 pr-4 py-2.5 rounded-xl border border-[#353534] focus:outline-none focus:border-[#e50914]"
+                    className="w-full bg-[#0e0e0e] text-[#e5e2e1] placeholder:text-[#e9bcb6]/50 text-xs sm:text-sm pl-10 pr-10 py-2.5 rounded-xl border border-[#353534] focus:outline-none focus:border-[#e50914]"
+                    autoComplete="off"
                   />
                   {isSearchingShows && (
                     <span className="material-symbols-outlined absolute right-3 top-2.5 text-[#e50914] text-sm animate-spin">
@@ -1248,32 +1348,103 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
                 </div>
 
                 {/* Show Search Suggestions Dropdown */}
-                {showSuggestionsOpen && showSearchSuggestions.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-[#1c1b1b] border border-[#353534] rounded-xl shadow-2xl overflow-hidden divide-y divide-[#353534]/50">
-                    {showSearchSuggestions.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => handleSelectShowSuggestion(item)}
-                        className="w-full p-2.5 flex items-center gap-3 hover:bg-[#2a2a2a] transition-colors text-left cursor-pointer"
-                      >
-                        <img
-                          src={getImageUrl(item.posterPath, 'w200')}
-                          alt={item.title}
-                          className="w-8 h-12 object-cover rounded bg-[#0e0e0e] shrink-0"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).src = DEFAULT_POSTER;
-                          }}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-xs font-bold text-[#e5e2e1] truncate">{item.title}</h4>
-                          <p className="text-[10px] text-[#e9bcb6]/70">
-                            {item.mediaType === 'movie' ? 'Feature Film' : 'TV Series'}
-                            {item.releaseDate ? ` • ${item.releaseDate.slice(0, 4)}` : ''}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
+                {showSuggestionsOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-[#1c1b1b] border border-[#353534] rounded-xl shadow-2xl overflow-hidden divide-y divide-[#353534]/50 max-h-64 overflow-y-auto">
+                    {isSearchingShows && showSearchSuggestions.length === 0 && (
+                      <div className="p-3 text-center text-xs text-[#e9bcb6]/70 flex items-center justify-center gap-2">
+                        <span className="material-symbols-outlined text-sm animate-spin text-[#e50914]">progress_activity</span>
+                        <span>Searching TMDB catalog…</span>
+                      </div>
+                    )}
+
+                    {searchShowsError && (
+                      <div className="p-2.5 text-center text-xs text-[#ffb4ab] bg-[#93000a]/20">
+                        {searchShowsError}
+                      </div>
+                    )}
+
+                    {!isSearchingShows && !searchShowsError && showSearchSuggestions.length === 0 && composerShowTitle.trim().length >= 2 && (
+                      <div className="p-3 text-center text-xs text-[#e9bcb6]/70 flex flex-col items-center gap-1">
+                        <span className="material-symbols-outlined text-base text-[#e50914]">search_off</span>
+                        <span>No matching movie or TV show found for &quot;{composerShowTitle}&quot;</span>
+                      </div>
+                    )}
+
+                    {showSearchSuggestions.map((item, idx) => {
+                      const isHighlighted = selectedSuggestionIndex === idx;
+                      const year = item.releaseDate
+                        ? item.releaseDate.slice(0, 4)
+                        : item.firstAirDate
+                        ? item.firstAirDate.slice(0, 4)
+                        : '';
+                      return (
+                        <button
+                          key={`${item.mediaType}-${item.id}`}
+                          type="button"
+                          onClick={() => handleSelectShowSuggestion(item)}
+                          onMouseEnter={() => setSelectedSuggestionIndex(idx)}
+                          className={`w-full p-2.5 flex items-center gap-3 transition-colors text-left cursor-pointer ${
+                            isHighlighted ? 'bg-[#2a2a2a] border-l-2 border-[#e50914]' : 'hover:bg-[#252424]'
+                          }`}
+                        >
+                          <img
+                            src={getImageUrl(item.posterPath, 'w200')}
+                            alt={item.title}
+                            className="w-8 h-12 object-cover rounded bg-[#0e0e0e] shrink-0 border border-[#353534]"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = DEFAULT_POSTER;
+                            }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-bold text-[#e5e2e1] truncate">{item.title}</h4>
+                            <p className="text-[10px] text-[#e9bcb6]/70 flex items-center gap-1.5 mt-0.5">
+                              <span className="px-1.5 py-0.2 rounded bg-[#0e0e0e] text-[#e50914] font-semibold text-[9px] uppercase">
+                                {item.mediaType === 'movie' ? 'Film' : 'TV'}
+                              </span>
+                              {year && <span>{year}</span>}
+                              {item.voteAverage > 0 && (
+                                <span className="text-[#e9bcb6]">★ {item.voteAverage.toFixed(1)}</span>
+                              )}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Selected TMDB Show Confirmation Preview Card */}
+                {composerTmdbId && composerTmdbId > 0 && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-[#0e0e0e] border border-[#70dc8e]/40 flex items-center justify-between gap-3 animate-fadeIn">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <img
+                        src={getImageUrl(composerPoster, 'w200')}
+                        alt={composerShowTitle}
+                        className="w-8 h-12 object-cover rounded bg-[#201f1f] shrink-0 border border-[#353534]"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src = DEFAULT_POSTER;
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-[#e5e2e1] truncate">{composerShowTitle}</p>
+                        <p className="text-[10px] text-[#70dc8e] font-semibold flex items-center gap-1 mt-0.5">
+                          <span className="material-symbols-outlined text-xs">verified</span>
+                          <span>TMDB Canonical ID #{composerTmdbId} • {composerMediaType === 'movie' ? 'Movie' : 'TV Series'}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setComposerTmdbId(null);
+                        setComposerPoster(null);
+                        setComposerBackdrop(null);
+                        setShowSuggestionsOpen(true);
+                      }}
+                      className="text-[11px] text-[#e9bcb6] hover:text-white px-2.5 py-1 rounded-lg bg-[#201f1f] hover:bg-[#2a2a2a] border border-[#353534] shrink-0 transition-colors cursor-pointer"
+                    >
+                      Change
+                    </button>
                   </div>
                 )}
               </div>

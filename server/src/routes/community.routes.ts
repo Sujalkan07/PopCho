@@ -76,6 +76,23 @@ router.get('/lookup', async (req: Request, res: Response) => {
 });
 
 /**
+ * 2.5 Retrieve user's joined communities (My Hubs)
+ * GET /api/communities/user/hubs
+ */
+router.get('/user/hubs', async (req: Request, res: Response) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ error: 'Authentication required to view your hubs' });
+    }
+    const hubs = await communityService.getUserHubs(req.user.id);
+    res.json({ hubs, count: hubs.length });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to retrieve user hubs';
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
  * 3. Retrieve community details by ID or Slug
  * GET /api/communities/:communityId
  */
