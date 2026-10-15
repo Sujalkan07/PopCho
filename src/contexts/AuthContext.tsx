@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../services/supabase/client';
+import { setCommunityAuthToken } from '../services/community/api';
+import { updateSocketAuth } from '../services/community/socket';
+
 
 export interface UserProfile {
   id: string;
@@ -124,12 +127,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   useEffect(() => {
+    const token = session?.access_token || null;
+    setCommunityAuthToken(token);
+    updateSocketAuth(token);
+
     if (user && session) {
       refreshProfile();
     } else {
       setProfile(null);
     }
   }, [user, session, refreshProfile]);
+
 
   const signUp = async (email: string, password: string, displayName?: string) => {
     if (!isSupabaseConfigured || !supabase) {

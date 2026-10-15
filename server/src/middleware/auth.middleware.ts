@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { serverSupabase, isServerSupabaseConfigured } from '../services/supabase.service.js';
+import { config } from '../config.js';
 import prisma from '../db/prisma.js';
 
 export interface UserIdentity {
@@ -28,11 +29,10 @@ export const DEFAULT_DEV_USER: UserIdentity = {
 };
 
 /**
- * Universal authentication middleware.
- * Supports:
- * 1. Supabase Bearer JWT verification (when Supabase is configured).
- * 2. Unverified JWT payload inspection in local development when keys are not yet configured.
- * 3. Fallback to custom dev headers (x-user-id, x-user-name).
+ * Production-hardened authentication middleware.
+ * Authenticates requests strictly via cryptographically verified Supabase Bearer JWTs.
+ * Custom dev headers and unverified token payloads are strictly rejected unless
+ * explicitly enabled via ENABLE_DEV_AUTH_BYPASS=true in non-production environments.
  */
 export async function authMiddleware(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
@@ -41,7 +41,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
     const token = authHeader.substring(7).trim();
 
     if (token) {
-      // If server Supabase client is configured, verify token cryptographically
+      // 1. Cryptographically verify Supabase Bearer token when configured
       if (isServerSupabaseConfigured && serverSupabase) {
         try {
           const { data, error } = await serverSupabase.auth.getUser(token);
@@ -51,17 +51,11 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
             const name = meta.full_name || meta.name || u.email?.split('@')[0] || 'PopCho Fan';
             const avatar = meta.avatar_url || meta.picture || DEFAULT_DEV_USER.avatar;
 
-            req.user = {
-              id: u.id,
-              name,
-              avatar,
-              role: 'Community Member',
-              email: u.email,
-            };
+            let role = 'Community Member';
 
-            // Optional asynchronous profile sync
+            // Synchronize profile and resolve server-authoritative role
             try {
-              await prisma.profile.upsert({
+              const profile = await prisma.profile.upsert({
                 where: { id: u.id },
                 update: {
                   email: u.email,
@@ -76,17 +70,34 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
                   role: 'Community Member',
                 },
               });
+              if (profile?.role) {
+                role = profile.role;
+              }
             } catch {
               // Silently ignore profile sync errors so request is not blocked
             }
 
+            req.user = {
+              id: u.id,
+              name,
+              avatar,
+              role,
+              email: u.email,
+            };
+
+            return next();
+          } else {
+            // Invalid token - do not attach identity and do not fall back to dev spoofing
             return next();
           }
-        } catch (err) {
-          console.error('[AuthMiddleware] Supabase token verification failed:', err);
+        } catch {
+          // Verification failure - do not attach identity
+          return next();
         }
-      } else {
-        // Fallback for development if Supabase token is passed but server keys are not yet set
+      }
+
+      // 2. Offline dev token fallback: ONLY allowed when explicitly configured in non-production
+      if (config.enableDevAuthBypass) {
         try {
           const parts = token.split('.');
           if (parts.length === 3) {
@@ -104,25 +115,27 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
             }
           }
         } catch {
-          // Token decode failed, proceed to dev header fallback
+          // Fall through to next check
         }
       }
     }
   }
 
-  // Fallback to dev headers
-  const customId = req.headers['x-user-id'] as string | undefined;
-  const customName = req.headers['x-user-name'] as string | undefined;
-  const customAvatar = req.headers['x-user-avatar'] as string | undefined;
-  const customRole = req.headers['x-user-role'] as string | undefined;
+  // 3. Fallback to custom dev headers: ONLY allowed when explicitly configured in non-production
+  if (config.enableDevAuthBypass) {
+    const customId = req.headers['x-user-id'] as string | undefined;
+    const customName = req.headers['x-user-name'] as string | undefined;
+    const customAvatar = req.headers['x-user-avatar'] as string | undefined;
+    const customRole = req.headers['x-user-role'] as string | undefined;
 
-  if (customId && customId.trim()) {
-    req.user = {
-      id: customId.trim(),
-      name: customName?.trim() || `User_${customId.slice(0, 6)}`,
-      avatar: customAvatar?.trim() || DEFAULT_DEV_USER.avatar,
-      role: customRole?.trim() || 'Community Member',
-    };
+    if (customId && customId.trim()) {
+      req.user = {
+        id: customId.trim(),
+        name: customName?.trim() || `User_${customId.slice(0, 6)}`,
+        avatar: customAvatar?.trim() || DEFAULT_DEV_USER.avatar,
+        role: customRole?.trim() || 'Community Member',
+      };
+    }
   }
 
   next();
@@ -146,3 +159,4 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  * Legacy export for backward compatibility
  */
 export const devAuthMiddleware = authMiddleware;
+

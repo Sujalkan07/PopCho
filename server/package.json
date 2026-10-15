@@ -4,12 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "node --dns-result-order=ipv4first ./node_modules/tsx/dist/cli.mjs watch src/index.ts",
     "build": "tsc",
-    "start": "tsx src/index.ts",
+    "start": "node --dns-result-order=ipv4first ./node_modules/tsx/dist/cli.mjs src/index.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "node --dns-result-order=ipv4first ./node_modules/tsx/dist/cli.mjs prisma/seed.ts",
+    "test:security": "node --dns-result-order=ipv4first ./node_modules/tsx/dist/cli.mjs src/tests/auth-security.test.ts",
+    "test:search": "node --dns-result-order=ipv4first ./node_modules/tsx/dist/cli.mjs src/tests/phase2-search-verify.test.ts",
+    "test:e2e": "node --dns-result-order=ipv4first ./node_modules/tsx/dist/cli.mjs src/tests/phase3-e2e-integration.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { MediaItem, ChatMessage, CommunityChannel } from '../../services/tmdb/types';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   lookupCommunity,
   getMessages,
@@ -53,6 +54,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
   initialChannelId,
   onBackToDashboard,
 }) => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'chat' | 'theories' | 'reviews'>('chat');
   const [communityRecord, setCommunityRecord] = useState<CommunityRecord | null>(null);
   const initialChannels = generateShowFallbackChannels(show);
@@ -260,6 +262,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
   // 5. Add / Toggle reaction handler with rollback on error
   const handleAddReaction = async (messageId: string, emoji: string) => {
     const previousMessages = messages;
+    const currentUserId = user?.id || 'guest';
 
     // Optimistic local update
     setMessages((prev) =>
@@ -267,8 +270,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
         if (m.id !== messageId) return m;
         const existing = m.reactions.find((r) => r.emoji === emoji);
         if (existing) {
-          const userAlreadyReacted =
-            existing.users.includes('current-user') || existing.users.includes('user_fan_01');
+          const userAlreadyReacted = existing.users.includes(currentUserId);
           if (userAlreadyReacted) {
             const nextCount = Math.max(0, existing.count - 1);
             return {
@@ -281,7 +283,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                         ? {
                             ...r,
                             count: nextCount,
-                            users: r.users.filter((u) => u !== 'current-user' && u !== 'user_fan_01'),
+                            users: r.users.filter((u) => u !== currentUserId),
                           }
                         : r
                     ),
@@ -290,13 +292,13 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
           return {
             ...m,
             reactions: m.reactions.map((r) =>
-              r.emoji === emoji ? { ...r, count: r.count + 1, users: [...r.users, 'current-user'] } : r
+              r.emoji === emoji ? { ...r, count: r.count + 1, users: [...r.users, currentUserId] } : r
             ),
           };
         }
         return {
           ...m,
-          reactions: [...m.reactions, { emoji, count: 1, users: ['current-user'] }],
+          reactions: [...m.reactions, { emoji, count: 1, users: [currentUserId] }],
         };
       })
     );

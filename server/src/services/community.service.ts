@@ -184,6 +184,85 @@ export class CommunityService {
   }
 
   /**
+   * Read-only lookup of community. Does NOT create rows in database on GET queries.
+   */
+  async lookupCommunityReadOnly(options: FindOrCreateCommunityOptions) {
+    const tmdbId = Number(options.tmdbId);
+    const mediaType = options.mediaType === 'movie' ? 'movie' : 'tv';
+
+    const community = await prisma.community.findUnique({
+      where: {
+        tmdbId_mediaType: {
+          tmdbId,
+          mediaType,
+        },
+      },
+      include: {
+        channels: {
+          orderBy: { createdAt: 'asc' },
+        },
+        _count: {
+          select: {
+            memberships: true,
+            channels: true,
+          },
+        },
+      },
+    });
+
+    if (community) {
+      return {
+        ...community,
+        memberCount: community._count.memberships,
+        channelCount: community._count.channels,
+        isPersisted: true,
+      };
+    }
+
+    // Not yet created in DB: return preview metadata without writing to database
+    let title = options.fallbackTitle || 'Untitled Hub';
+    let description = options.fallbackOverview || '';
+    let posterPath = options.fallbackPoster || '';
+    let backdropPath = options.fallbackBackdrop || '';
+
+    try {
+      const tmdbDetails = await tmdbService.getDetails(tmdbId, mediaType);
+      if (tmdbDetails) {
+        title = tmdbDetails.title || title;
+        description = tmdbDetails.overview || description;
+        posterPath = tmdbDetails.posterPath || posterPath;
+        backdropPath = tmdbDetails.backdropPath || backdropPath;
+      }
+    } catch {
+      // Fallback to options
+    }
+
+    const slug = this.generateSlug(title, mediaType, tmdbId);
+    const previewChannels = [
+      { id: `preview-gen-${tmdbId}`, communityId: `temp-${tmdbId}`, name: 'general', slug: 'general', description: `General discussion for ${title}`, type: 'TEXT', isSpoilerSafe: false },
+      { id: `preview-theories-${tmdbId}`, communityId: `temp-${tmdbId}`, name: 'theories', slug: 'theories', description: `Storyline analysis and theories for ${title}`, type: 'TEXT', isSpoilerSafe: true },
+      { id: `preview-spoilers-${tmdbId}`, communityId: `temp-${tmdbId}`, name: 'spoilers', slug: 'spoilers', description: `Spoiler-masked reactions and leaks for ${title}`, type: 'TEXT', isSpoilerSafe: true },
+    ];
+
+    return {
+      id: `virtual-${mediaType}-${tmdbId}`,
+      tmdbId,
+      mediaType,
+      title,
+      slug,
+      description,
+      posterPath,
+      backdropPath,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      channels: previewChannels,
+      memberCount: 0,
+      channelCount: previewChannels.length,
+      isPersisted: false,
+    };
+  }
+
+  /**
    * Find or create community by (tmdbId, mediaType)
    */
   async findOrCreateCommunity(options: FindOrCreateCommunityOptions) {

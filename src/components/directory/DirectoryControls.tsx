@@ -62,6 +62,16 @@ export const DirectoryControls: React.FC<DirectoryControlsProps> = ({
             className="w-full h-12 pl-12 pr-28 rounded-xl bg-[#0e0e0e] text-[#e5e2e1] placeholder:text-[#e9bcb6]/50 text-sm sm:text-base border border-[#353534]/60 focus:outline-none focus:border-[#e50914] focus:ring-1 focus:ring-[#e50914] transition-all"
           />
           <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => onSearchChange('')}
+                className="text-[#e9bcb6]/60 hover:text-white p-1 rounded cursor-pointer transition-colors"
+                title="Clear search"
+              >
+                <span className="material-symbols-outlined text-base">close</span>
+              </button>
+            )}
             <span className="px-2 py-0.5 rounded bg-[#2a2a2a] text-[#e9bcb6] text-xs font-mono font-medium border border-[#353534]">
               ⌘K
             </span>

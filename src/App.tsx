@@ -24,10 +24,11 @@ export function AppContent() {
 
   const { user, getAuthHeaders } = useAuth();
 
-  // Bookmarked show IDs with localStorage & database persistence
+  // Bookmarked show IDs strictly scoped to authenticated user or guest to prevent cross-account leaks
   const [bookmarkedIds, setBookmarkedIds] = useState<Record<string | number, boolean>>(() => {
     try {
-      const saved = localStorage.getItem('popcho_bookmarks');
+      const storageKey = user ? `popcho_bookmarks_${user.id}` : 'popcho_bookmarks_guest';
+      const saved = localStorage.getItem(storageKey);
       return saved ? JSON.parse(saved) : {};
     } catch {
       return {};
@@ -41,10 +42,28 @@ export function AppContent() {
   const [activeWorkspaceShow, setActiveWorkspaceShow] = useState<MediaItem | null>(null);
   const [activeWorkspaceChannelId, setActiveWorkspaceChannelId] = useState<string | undefined>(undefined);
 
-  // Sync saved items from database when user is authenticated
+  // Sync saved items from database when user changes or authenticates (clears on logout/switch)
   useEffect(() => {
-    if (!user) return;
     let isMounted = true;
+
+    if (!user) {
+      try {
+        const saved = localStorage.getItem('popcho_bookmarks_guest');
+        setBookmarkedIds(saved ? JSON.parse(saved) : {});
+      } catch {
+        setBookmarkedIds({});
+      }
+      return;
+    }
+
+    // Immediately isolate to current user's cache
+    try {
+      const saved = localStorage.getItem(`popcho_bookmarks_${user.id}`);
+      setBookmarkedIds(saved ? JSON.parse(saved) : {});
+    } catch {
+      setBookmarkedIds({});
+    }
+
     fetch(`${API_BASE_URL}/api/watchlist/ids`, {
       headers: {
         Accept: 'application/json',
@@ -54,13 +73,17 @@ export function AppContent() {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!isMounted || !data?.items) return;
-        setBookmarkedIds((prev) => {
-          const updated = { ...prev };
-          for (const item of data.items) {
-            updated[item.tmdbId] = true;
-          }
-          return updated;
-        });
+        const fresh: Record<string | number, boolean> = {};
+        for (const item of data.items) {
+          fresh[item.tmdbId] = true;
+          fresh[`${item.mediaType}-${item.tmdbId}`] = true;
+        }
+        setBookmarkedIds(fresh);
+        try {
+          localStorage.setItem(`popcho_bookmarks_${user.id}`, JSON.stringify(fresh));
+        } catch {
+          // ignore storage errors
+        }
       })
       .catch(() => {});
 
@@ -69,15 +92,19 @@ export function AppContent() {
     };
   }, [user, getAuthHeaders]);
 
-  // Toggle bookmark handler with server persistence
+  // Toggle bookmark handler with user-scoped storage & server persistence
   const handleToggleBookmark = (showId: string | number, mediaItem?: MediaItem) => {
     const numericId = Number(showId);
     const willBookmark = !bookmarkedIds[showId];
 
     setBookmarkedIds((prev) => {
       const next = { ...prev, [showId]: willBookmark };
+      if (mediaItem) {
+        next[`${mediaItem.mediaType}-${numericId}`] = willBookmark;
+      }
       try {
-        localStorage.setItem('popcho_bookmarks', JSON.stringify(next));
+        const storageKey = user ? `popcho_bookmarks_${user.id}` : 'popcho_bookmarks_guest';
+        localStorage.setItem(storageKey, JSON.stringify(next));
       } catch {
         // ignore storage errors
       }
@@ -132,7 +159,7 @@ export function AppContent() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onOpenNotifications={() => setNotificationToast('No unread notifications.')}
-          onOpenFriends={() => setNotificationToast('8 friends currently active across fandoms.')}
+          onOpenFriends={() => setNotificationToast('Community channels are active. Join a fandom hub to chat with fans live!')}
         />
         <main className="pt-[108px] lg:pt-[68px]">
           <CommunityChatWorkspace
@@ -175,7 +202,7 @@ export function AppContent() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onOpenNotifications={() => setNotificationToast('No unread notifications.')}
-        onOpenFriends={() => setNotificationToast('8 friends currently active across fandoms.')}
+        onOpenFriends={() => setNotificationToast('Community channels are active. Join a fandom hub to chat with fans live!')}
       />
 
       {/* Routed Main Page Area */}

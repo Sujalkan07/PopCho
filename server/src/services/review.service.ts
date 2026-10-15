@@ -388,6 +388,29 @@ export class ReviewService {
 
     return ranked;
   }
+
+  /**
+   * Delete a review with strict user ownership enforcement.
+   */
+  async deleteReview(reviewId: string, userId: string) {
+    const review = await prisma.review.findUnique({
+      where: { id: reviewId },
+    });
+    if (!review) {
+      const err = new Error('Review not found');
+      (err as unknown as { statusCode: number }).statusCode = 404;
+      throw err;
+    }
+    if (review.userId !== userId) {
+      const err = new Error('Unauthorized to delete this review');
+      (err as unknown as { statusCode: number }).statusCode = 403;
+      throw err;
+    }
+    await prisma.review.delete({
+      where: { id: reviewId },
+    });
+    return { success: true, message: 'Review deleted successfully' };
+  }
 }
 
 export const reviewService = new ReviewService();

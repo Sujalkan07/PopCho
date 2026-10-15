@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { MediaItem } from '../services/tmdb/types';
 import { getPopularTvShows, getTrendingTvShows } from '../services/tmdb/tv';
 import { getPopularMovies, getTrendingMovies } from '../services/tmdb/movies';
@@ -25,13 +26,18 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
   setNotificationToast,
 }) => {
   // Directory layout, search & filter state
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSearchQuery = searchParams.get('search') || searchParams.get('q') || '';
+
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(urlSearchQuery);
   const [selectedGenre, setSelectedGenre] = useState('all');
   const [sortBy, setSortBy] = useState<'active' | 'rating' | 'recent' | 'trending'>('active');
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'tv' | 'movie'>('all');
   const [minRatingFilter, setMinRatingFilter] = useState<number>(0);
   const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = useState(false);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Data fetching state
   const [catalogItems, setCatalogItems] = useState<MediaItem[]>([]);
@@ -157,7 +163,31 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
     }
   };
 
-  // Debounced search effect
+  const catalogRef = useRef(catalogItems);
+  useEffect(() => {
+    catalogRef.current = catalogItems;
+  }, [catalogItems]);
+
+  // Sync external search query from URL (e.g. from Navbar omnibox)
+  useEffect(() => {
+    if (urlSearchQuery !== searchQuery) {
+      setSearchQuery(urlSearchQuery);
+    }
+  }, [urlSearchQuery, searchQuery]);
+
+  // Focus search input on ⌘K
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Debounced search effect with race-condition cancellation
   useEffect(() => {
     const clean = searchQuery.trim();
     if (clean.length < 2) {
@@ -168,16 +198,19 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
       return () => clearTimeout(timer);
     }
 
+    let isSubscribed = true;
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
         const res = await searchMedia(clean, 1);
+        if (!isSubscribed) return;
         setSearchResults(res.results);
       } catch (err: unknown) {
+        if (!isSubscribed) return;
         console.error('Communities directory search failed:', err);
         // Local client search fallback over already-loaded items
         const term = clean.toLowerCase();
-        const fallback = catalogItems.filter(
+        const fallback = (catalogRef.current || []).filter(
           (item) =>
             item.title.toLowerCase().includes(term) ||
             item.overview.toLowerCase().includes(term) ||
@@ -185,12 +218,17 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
         );
         setSearchResults(fallback);
       } finally {
-        setIsSearching(false);
+        if (isSubscribed) {
+          setIsSearching(false);
+        }
       }
     }, 350);
 
-    return () => clearTimeout(timer);
-  }, [searchQuery, catalogItems]);
+    return () => {
+      isSubscribed = false;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
 
   // Genre matcher helper
   const matchesGenre = useCallback((item: MediaItem, genreId: string): boolean => {
@@ -306,9 +344,18 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
                   search
                 </span>
                 <input
+                  ref={searchInputRef}
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSearchQuery(val);
+                    if (val.trim()) {
+                      setSearchParams({ search: val.trim() }, { replace: true });
+                    } else {
+                      setSearchParams({}, { replace: true });
+                    }
+                  }}
                   placeholder="Search by show title, network, creator, or sub-fandom (e.g. Severance, Lumon, HBO, Duffer Brothers)..."
                   className="w-full h-12 pl-12 pr-28 rounded-xl bg-[#0e0e0e] text-[#e5e2e1] placeholder:text-[#e9bcb6]/50 text-sm sm:text-base border border-[#353534]/60 focus:outline-none focus:border-[#e50914] focus:ring-1 focus:ring-[#e50914] transition-all"
                 />
@@ -316,7 +363,10 @@ export const CommunitiesPage: React.FC<CommunitiesPageProps> = ({
                   {searchQuery && (
                     <button
                       type="button"
-                      onClick={() => setSearchQuery('')}
+                      onClick={() => {
+                        setSearchQuery('');
+                        setSearchParams({}, { replace: true });
+                      }}
                       className="text-xs text-[#e9bcb6]/60 hover:text-white px-1.5 py-0.5 rounded hover:bg-[#201f1f]"
                       title="Clear search"
                     >

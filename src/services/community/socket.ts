@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { getDevUserHeaders, type MessageRecord, type ReactionRecord } from './api';
+import { getStoredAccessToken, type MessageRecord, type ReactionRecord } from './api';
 
 const rawEnvUrl = (import.meta.env.VITE_API_URL || '').trim();
 const normalizedSocketUrl = rawEnvUrl ? rawEnvUrl.replace(/\/api.*$/, '').replace(/\/+$/, '') : '';
@@ -12,21 +12,36 @@ const SOCKET_URL =
 
 let socket: Socket | null = null;
 
+export function updateSocketAuth(token: string | null): void {
+  if (socket) {
+    socket.auth = {
+      token: token || undefined,
+    };
+    if (token) {
+      if (!socket.connected) {
+        socket.connect();
+      }
+    } else {
+      if (socket.connected) {
+        socket.disconnect();
+      }
+    }
+  }
+}
+
 export function getCommunitySocket(): Socket {
   if (!socket) {
-    const headers = getDevUserHeaders();
+    const token = getStoredAccessToken();
     socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
-      autoConnect: true,
+      autoConnect: Boolean(token),
       auth: {
-        userId: headers['x-user-id'],
-        userName: headers['x-user-name'],
-        userAvatar: headers['x-user-avatar'],
-        userRole: headers['x-user-role'],
+        token: token || undefined,
       },
     });
+
 
     socket.on('connect', () => {
       console.log('[PopCho Socket] Connected with ID:', socket?.id);
@@ -43,6 +58,7 @@ export function getCommunitySocket(): Socket {
 
   return socket;
 }
+
 
 export function isSocketConnected(): boolean {
   return socket ? socket.connected : false;

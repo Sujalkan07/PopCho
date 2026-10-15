@@ -142,8 +142,32 @@ export class ChatService {
       },
     });
 
-    // Reverse into chronological order (oldest to newest) for client display
-    return messages.reverse().map((m) => this.formatMessage(m));
+    const userIds = Array.from(new Set(messages.map((m) => m.userId)));
+    let profileMap = new Map<
+      string,
+      { displayName?: string | null; username?: string | null; avatarUrl?: string | null; role?: string | null }
+    >();
+    if (userIds.length > 0) {
+      try {
+        const profiles = await prisma.profile.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, displayName: true, username: true, avatarUrl: true, role: true },
+        });
+        profileMap = new Map(profiles.map((p) => [p.id, p]));
+      } catch {
+        // Fallback gracefully if profiles table lookup fails
+      }
+    }
+
+    // Reverse into chronological order (oldest to newest) for client display with authentic author details
+    return messages.reverse().map((m) => {
+      const prof = profileMap.get(m.userId);
+      return this.formatMessage(m, prof ? {
+        name: prof.displayName || prof.username || undefined,
+        avatar: prof.avatarUrl || undefined,
+        role: prof.role || undefined,
+      } : undefined);
+    });
   }
 
   /**
@@ -186,10 +210,27 @@ export class ChatService {
       },
     });
 
+    let authorName = params.userName;
+    let authorAvatar = params.userAvatar;
+    let authorRole = params.userRole;
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { id: params.userId },
+        select: { displayName: true, username: true, avatarUrl: true, role: true },
+      });
+      if (profile) {
+        authorName = profile.displayName || profile.username || authorName;
+        authorAvatar = profile.avatarUrl || authorAvatar;
+        authorRole = profile.role || authorRole;
+      }
+    } catch {
+      // Fallback
+    }
+
     return this.formatMessage(message, {
-      name: params.userName,
-      avatar: params.userAvatar,
-      role: params.userRole,
+      name: authorName,
+      avatar: authorAvatar,
+      role: authorRole,
     });
   }
 

@@ -1,6 +1,13 @@
-import './dns-resolver.js';
 import dns from 'node:dns';
 import http from 'node:http';
+
+// Decommission fragile DNS monkey-patching in favor of Node.js native IPv4-first resolution
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  // Graceful fallback for older Node runtimes
+}
+
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import { config, getSafeConfigDiagnostics } from './config.js';
@@ -164,13 +171,27 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 const httpServer = http.createServer(app);
 const io = initSocketServer(httpServer, allowedOrigins);
 
-httpServer.listen(config.port, () => {
-  const diagnostics = getSafeConfigDiagnostics();
-  console.log(`[PopCho Server] Listening on http://localhost:${diagnostics.port}`);
-  console.log(`[PopCho Server] TMDB Auth Mode: ${diagnostics.tmdbAuthMode} (Configured: ${diagnostics.tmdbConfigured})`);
-  console.log(`[PopCho Server] Database Configured: ${diagnostics.databaseConfigured}`);
-  console.log(`[PopCho Server] Real-time messaging active with Socket.IO`);
-});
+const isMainModule =
+  process.env.NODE_ENV !== 'test' &&
+  Boolean(
+    process.argv[1] &&
+      (process.argv[1].endsWith('src\\index.ts') ||
+        process.argv[1].endsWith('src/index.ts') ||
+        process.argv[1].endsWith('dist\\index.js') ||
+        process.argv[1].endsWith('dist/index.js'))
+  );
+
+if (isMainModule) {
+  httpServer.listen(config.port, () => {
+    const diagnostics = getSafeConfigDiagnostics();
+    console.log(`[PopCho Server] Listening on http://localhost:${diagnostics.port}`);
+    console.log(`[PopCho Server] TMDB Auth Mode: ${diagnostics.tmdbAuthMode} (Configured: ${diagnostics.tmdbConfigured})`);
+    console.log(`[PopCho Server] Database Configured: ${diagnostics.databaseConfigured}`);
+    console.log(`[PopCho Server] Real-time messaging active with Socket.IO`);
+  });
+}
 
 export { app, httpServer, io };
+
 export default app;
+

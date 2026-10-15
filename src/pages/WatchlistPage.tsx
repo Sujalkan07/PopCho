@@ -184,8 +184,18 @@ export const WatchlistPage: React.FC<WatchlistPageProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search watchlist..."
-                className="h-9 pl-9 pr-3 bg-[#201f1f] text-xs text-[#e5e2e1] placeholder:text-[#e9bcb6]/40 rounded-xl border border-[#353534] focus:border-[#e50914] focus:outline-none transition-colors"
+                className="h-9 pl-9 pr-8 bg-[#201f1f] text-xs text-[#e5e2e1] placeholder:text-[#e9bcb6]/40 rounded-xl border border-[#353534] focus:border-[#e50914] focus:outline-none transition-colors"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-2 text-[#e9bcb6]/60 hover:text-white p-0.5 rounded cursor-pointer"
+                  title="Clear search"
+                >
+                  <span className="material-symbols-outlined text-xs">close</span>
+                </button>
+              )}
             </div>
           </div>
         )}

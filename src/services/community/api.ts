@@ -58,59 +58,47 @@ function getCommunityApiBaseUrl(): string {
 
 const BASE_URL = getCommunityApiBaseUrl();
 
-let cachedAuthToken: string | null = null;
+let cachedAuthToken: string | null | undefined = undefined;
 
 export function setCommunityAuthToken(token: string | null) {
   cachedAuthToken = token;
 }
 
-// Helper for identity headers (supports Supabase Bearer JWT & dev fallback)
-export function getDevUserHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-
-  if (cachedAuthToken) {
-    headers['Authorization'] = `Bearer ${cachedAuthToken}`;
-  } else {
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
-          const item = localStorage.getItem(key);
-          if (item) {
-            const parsed = JSON.parse(item);
-            if (parsed && parsed.access_token) {
-              headers['Authorization'] = `Bearer ${parsed.access_token}`;
-              break;
-            }
+export function getStoredAccessToken(): string | null {
+  if (cachedAuthToken !== undefined) {
+    return cachedAuthToken;
+  }
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          const parsed = JSON.parse(item);
+          if (parsed && parsed.access_token) {
+            return parsed.access_token;
           }
         }
       }
-    } catch {
-      // ignore localStorage parse issues
     }
+  } catch {
+    // ignore localStorage parse issues
   }
+  return null;
+}
 
-  const savedUser = localStorage.getItem('popcho_user');
-  if (savedUser) {
-    try {
-      const parsed = JSON.parse(savedUser);
-      headers['x-user-id'] = parsed.id || 'user_fan_01';
-      headers['x-user-name'] = parsed.name || 'You (Fan)';
-      headers['x-user-avatar'] = parsed.avatar || '';
-      headers['x-user-role'] = parsed.role || 'Community Member';
-      return headers;
-    } catch {
-      // fallback
-    }
+// Helper for identity headers (passes cryptographically verified Supabase Bearer JWT)
+export function getDevUserHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = getStoredAccessToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
-
-  if (!headers['Authorization']) {
-    headers['x-user-id'] = 'user_fan_01';
-    headers['x-user-name'] = 'You (Fan)';
-  }
-
   return headers;
 }
+
+export const getAuthHeaders = getDevUserHeaders;
+
 
 export async function listCommunities(params: {
   page?: number;

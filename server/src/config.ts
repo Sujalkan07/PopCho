@@ -49,6 +49,8 @@ export const config = {
   clientUrl: (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, ''),
   jwtSecret: process.env.JWT_SECRET || 'popcho_jwt_secret_dev',
   databaseUrl: process.env.DATABASE_URL || '',
+  enableDevAuthBypass:
+    process.env.NODE_ENV !== 'production' && process.env.ENABLE_DEV_AUTH_BYPASS === 'true',
   tmdb: {
     apiKey,
     readAccessToken,
@@ -72,5 +74,7 @@ export function getSafeConfigDiagnostics() {
     tmdbAuthMode: config.tmdb.authMode,
     tmdbConfigured: config.tmdb.isConfigured(),
     tmdbBaseUrl: config.tmdb.baseUrl,
+    devAuthBypass: config.enableDevAuthBypass,
   };
 }
+

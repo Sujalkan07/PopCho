@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { MediaItem, NormalizedTmdbReview } from '../services/tmdb/types';
 import { getImageUrl, DEFAULT_POSTER, DEFAULT_BACKDROP } from '../services/tmdb/client';
 import { getMediaReviews } from '../services/tmdb/reviews';
@@ -67,9 +68,19 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
   const [reviewLoadError, setReviewLoadError] = useState<string | null>(null);
 
   // Filter & Search state
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSearchQuery = searchParams.get('q') || searchParams.get('search') || '';
+
   const [activeFilter, setActiveFilter] = useState('All Reviews');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(urlSearchQuery);
   const [expandedBodies, setExpandedBodies] = useState<Record<string, boolean>>({});
+
+  // Sync external search query from URL
+  useEffect(() => {
+    if (urlSearchQuery !== searchQuery) {
+      setSearchQuery(urlSearchQuery);
+    }
+  }, [urlSearchQuery, searchQuery]);
 
   // Real Top Critics Leaderboard state
   const [topCritics, setTopCritics] = useState<CriticRanking[]>([]);
@@ -582,10 +593,31 @@ export const CommunityReviewsPage: React.FC<CommunityReviewsPageProps> = ({
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchQuery(val);
+                  if (val.trim()) {
+                    setSearchParams({ q: val.trim() }, { replace: true });
+                  } else {
+                    setSearchParams({}, { replace: true });
+                  }
+                }}
                 placeholder="Search reviews by show, author, or keyword..."
-                className="w-full h-10 pl-10 pr-4 bg-[#0e0e0e] text-[#e5e2e1] placeholder:text-[#e9bcb6]/60 text-xs sm:text-sm rounded-xl focus:outline-none border border-[#353534]/50 focus:border-[#e50914]"
+                className="w-full h-10 pl-10 pr-10 bg-[#0e0e0e] text-[#e5e2e1] placeholder:text-[#e9bcb6]/60 text-xs sm:text-sm rounded-xl focus:outline-none border border-[#353534]/50 focus:border-[#e50914]"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSearchParams({}, { replace: true });
+                  }}
+                  className="absolute right-3 top-2.5 text-[#e9bcb6]/60 hover:text-white p-0.5 rounded cursor-pointer"
+                  title="Clear search"
+                >
+                  <span className="material-symbols-outlined text-sm">close</span>
+                </button>
+              )}
             </div>
 
             <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 scrollbar-none">

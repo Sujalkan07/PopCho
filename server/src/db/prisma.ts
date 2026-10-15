@@ -1,3 +1,4 @@
+import '../config.js';
 import { PrismaClient } from '../generated/prisma/client.js';
 
 // Prevent multiple PrismaClient instances in development

@@ -2,6 +2,9 @@ import type { Server as HttpServer } from 'node:http';
 import { Server as SocketIOServer, type Socket } from 'socket.io';
 import { chatService } from './services/chat.service.js';
 import { DEFAULT_DEV_USER } from './middleware/auth.middleware.js';
+import { serverSupabase, isServerSupabaseConfigured } from './services/supabase.service.js';
+import { config } from './config.js';
+import prisma from './db/prisma.js';
 
 interface SocketUser {
   id: string;
@@ -20,29 +23,86 @@ export function initSocketServer(httpServer: HttpServer, allowedOrigins: string[
     transports: ['websocket', 'polling'],
   });
 
-  // Authentication & handshake middleware
-  io.use((socket: Socket, next) => {
-    const auth = socket.handshake.auth || {};
-    const headers = socket.handshake.headers || {};
+  // Cryptographically verified authentication & handshake middleware
+  io.use(async (socket: Socket, next) => {
+    try {
+      const auth = socket.handshake.auth || {};
+      const headers = socket.handshake.headers || {};
 
-    const userId = (auth.userId || headers['x-user-id'] || DEFAULT_DEV_USER.id) as string;
-    const name = (auth.userName || headers['x-user-name'] || DEFAULT_DEV_USER.name) as string;
-    const avatar = (auth.userAvatar || headers['x-user-avatar'] || DEFAULT_DEV_USER.avatar) as string;
-    const role = (auth.userRole || headers['x-user-role'] || DEFAULT_DEV_USER.role) as string;
+      const rawToken =
+        auth.token ||
+        (typeof headers.authorization === 'string' && headers.authorization.startsWith('Bearer ')
+          ? headers.authorization.substring(7).trim()
+          : undefined);
 
-    socket.data.user = {
-      id: userId.trim(),
-      name: name.trim(),
-      avatar: avatar.trim(),
-      role: role.trim(),
-    } as SocketUser;
+      // 1. Verify Supabase JWT token cryptographically
+      if (rawToken && isServerSupabaseConfigured && serverSupabase) {
+        const { data, error } = await serverSupabase.auth.getUser(rawToken);
+        if (error || !data.user) {
+          return next(new Error('Authentication failed: Invalid token'));
+        }
 
-    next();
+        const u = data.user;
+        const meta = u.user_metadata || {};
+        const name = meta.full_name || meta.name || u.email?.split('@')[0] || 'PopCho Fan';
+        const avatar = meta.avatar_url || meta.picture || DEFAULT_DEV_USER.avatar;
+
+        let role = 'Community Member';
+        try {
+          const profile = await prisma.profile.findUnique({ where: { id: u.id } });
+          if (profile?.role) {
+            role = profile.role;
+          }
+        } catch {
+          // ignore DB lookup failure
+        }
+
+        socket.data.user = {
+          id: u.id,
+          name,
+          avatar,
+          role,
+        } as SocketUser;
+
+        return next();
+      }
+
+      // 2. Local dev auth bypass (gated strictly by ENABLE_DEV_AUTH_BYPASS in non-production)
+      if (config.enableDevAuthBypass) {
+        const userId = (auth.userId || headers['x-user-id'] || DEFAULT_DEV_USER.id) as string;
+        const name = (auth.userName || headers['x-user-name'] || DEFAULT_DEV_USER.name) as string;
+        const avatar = (auth.userAvatar || headers['x-user-avatar'] || DEFAULT_DEV_USER.avatar) as string;
+        const role = (auth.userRole || headers['x-user-role'] || DEFAULT_DEV_USER.role) as string;
+
+        socket.data.user = {
+          id: userId.trim(),
+          name: name.trim(),
+          avatar: avatar.trim(),
+          role: role.trim(),
+        } as SocketUser;
+
+        return next();
+      }
+
+      if (rawToken) {
+        return next(new Error('Authentication failed: Invalid token'));
+      }
+
+      return next(new Error('Authentication required: Missing token'));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Authentication failed';
+      return next(new Error(msg));
+    }
   });
 
   io.on('connection', (socket: Socket) => {
     const user = socket.data.user as SocketUser;
+    if (!user) {
+      socket.disconnect(true);
+      return;
+    }
     console.log(`[Socket.IO] Client connected: ${socket.id} (user: ${user.name} [${user.id}])`);
+
 
     /**
      * Join channel room with database validation

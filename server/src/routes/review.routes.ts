@@ -1,11 +1,12 @@
 import { Router, type Request, type Response } from 'express';
 import { reviewService } from '../services/review.service.js';
-import { devAuthMiddleware } from '../middleware/auth.middleware.js';
+import { authMiddleware, requireAuth } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
 // Apply auth middleware to identify user
-router.use(devAuthMiddleware);
+router.use(authMiddleware);
+
 
 function parseParamId(id: unknown): string {
   if (Array.isArray(id)) return String(id[0] || '');
@@ -57,12 +58,8 @@ router.get('/critics/top', async (_req: Request, res: Response) => {
  * POST /api/reviews
  * Create a new critical deep dive review
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required to publish reviews.' });
-    }
-
     const {
       tmdbId,
       mediaType,
@@ -91,7 +88,7 @@ router.post('/', async (req: Request, res: Response) => {
         categoryTag,
         hasSpoiler,
       },
-      req.user
+      req.user!
     );
 
     res.status(201).json(review);
@@ -106,14 +103,10 @@ router.post('/', async (req: Request, res: Response) => {
  * POST /api/reviews/:id/vote
  * Toggle helpful vote for a review
  */
-router.post('/:id/vote', async (req: Request, res: Response) => {
+router.post('/:id/vote', requireAuth, async (req: Request, res: Response) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required to vote.' });
-    }
-
     const reviewId = parseParamId(req.params.id);
-    const result = await reviewService.toggleHelpful(reviewId, req.user.id);
+    const result = await reviewService.toggleHelpful(reviewId, req.user!.id);
     res.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to toggle vote';
@@ -126,14 +119,10 @@ router.post('/:id/vote', async (req: Request, res: Response) => {
  * POST /api/reviews/:id/bookmark
  * Toggle bookmark for a review
  */
-router.post('/:id/bookmark', async (req: Request, res: Response) => {
+router.post('/:id/bookmark', requireAuth, async (req: Request, res: Response) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required to bookmark.' });
-    }
-
     const reviewId = parseParamId(req.params.id);
-    const result = await reviewService.toggleBookmark(reviewId, req.user.id);
+    const result = await reviewService.toggleBookmark(reviewId, req.user!.id);
     res.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to toggle bookmark';
@@ -162,20 +151,33 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
  * POST /api/reviews/:id/comments
  * Add a comment to a review
  */
-router.post('/:id/comments', async (req: Request, res: Response) => {
+router.post('/:id/comments', requireAuth, async (req: Request, res: Response) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required to comment.' });
-    }
-
     const reviewId = parseParamId(req.params.id);
     const { content } = req.body;
-    const comment = await reviewService.addComment(reviewId, content, req.user);
+    const comment = await reviewService.addComment(reviewId, content, req.user!);
     res.status(201).json(comment);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to post comment';
     console.error('[Review Route Error] POST /api/reviews/:id/comments:', msg);
     res.status(400).json({ error: msg });
+  }
+});
+
+/**
+ * DELETE /api/reviews/:id
+ * Delete a review (strictly enforces author ownership)
+ */
+router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const reviewId = parseParamId(req.params.id);
+    const result = await reviewService.deleteReview(reviewId, req.user!.id);
+    res.json(result);
+  } catch (err: unknown) {
+    const status = (err as { statusCode?: number })?.statusCode || 500;
+    const msg = err instanceof Error ? err.message : 'Failed to delete review';
+    console.error('[Review Route Error] DELETE /api/reviews/:id:', msg);
+    res.status(status).json({ error: msg });
   }
 });
 

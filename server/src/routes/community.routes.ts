@@ -1,12 +1,13 @@
 import { Router, type Request, type Response } from 'express';
 import { communityService } from '../services/community.service.js';
 import { chatService } from '../services/chat.service.js';
-import { devAuthMiddleware } from '../middleware/auth.middleware.js';
+import { authMiddleware, requireAuth } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-// Apply dev auth middleware to all community routes
-router.use(devAuthMiddleware);
+// Apply auth middleware to all community routes
+router.use(authMiddleware);
+
 
 /**
  * 1. List communities with pagination and search
@@ -34,7 +35,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 /**
- * 2. Find or create a community by TMDB ID and Media Type
+ * 2. Lookup a community by TMDB ID and Media Type (Read-Only, no write side effects)
  * GET /api/communities/lookup?tmdbId=...&mediaType=...
  */
 router.get('/lookup', async (req: Request, res: Response) => {
@@ -51,7 +52,7 @@ router.get('/lookup', async (req: Request, res: Response) => {
     const fallbackBackdrop = req.query.backdrop as string | undefined;
     const fallbackOverview = req.query.overview as string | undefined;
 
-    const community = await communityService.findOrCreateCommunity({
+    const community = await communityService.lookupCommunityReadOnly({
       tmdbId,
       mediaType,
       fallbackTitle,
@@ -60,7 +61,7 @@ router.get('/lookup', async (req: Request, res: Response) => {
       fallbackOverview,
     });
 
-    const membership = req.user
+    const membership = (community.isPersisted && req.user)
       ? await communityService.getMembershipStatus(community.id, req.user.id)
       : { isMember: false, role: null };
 
@@ -79,12 +80,9 @@ router.get('/lookup', async (req: Request, res: Response) => {
  * 2.5 Retrieve user's joined communities (My Hubs)
  * GET /api/communities/user/hubs
  */
-router.get('/user/hubs', async (req: Request, res: Response) => {
+router.get('/user/hubs', requireAuth, async (req: Request, res: Response) => {
   try {
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ error: 'Authentication required to view your hubs' });
-    }
-    const hubs = await communityService.getUserHubs(req.user.id);
+    const hubs = await communityService.getUserHubs(req.user!.id);
     res.json({ hubs, count: hubs.length });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to retrieve user hubs';
@@ -114,19 +112,39 @@ router.get('/:communityId', async (req: Request, res: Response) => {
 });
 
 /**
- * 4. Join a community
+ * 4. Join a community (Creates community at write-time if it was previewed)
  * POST /api/communities/:communityId/join
  */
-router.post('/:communityId/join', async (req: Request, res: Response) => {
+router.post('/:communityId/join', requireAuth, async (req: Request, res: Response) => {
   try {
     const communityId = req.params.communityId as string;
     const userId = req.user!.id;
     const role = (req.body?.role as string) || 'MEMBER';
+    const tmdbId = req.body?.tmdbId ? Number(req.body.tmdbId) : undefined;
+    const mediaType = (req.body?.mediaType as string) || 'tv';
+    const fallbackTitle = req.body?.title as string | undefined;
+    const fallbackPoster = req.body?.posterPath as string | undefined;
+    const fallbackBackdrop = req.body?.backdropPath as string | undefined;
 
-    const result = await communityService.joinCommunity(communityId, userId, role);
+    let targetCommunityId = communityId;
+    // If joining a virtual preview community or joining by TMDB info, ensure it is created in DB
+    if (communityId.startsWith('virtual-') || (tmdbId && !isNaN(tmdbId))) {
+      const parsedTmdbId = tmdbId || Number(communityId.split('-').pop());
+      const ensured = await communityService.findOrCreateCommunity({
+        tmdbId: parsedTmdbId,
+        mediaType,
+        fallbackTitle,
+        fallbackPoster,
+        fallbackBackdrop,
+      });
+      targetCommunityId = ensured.id;
+    }
+
+    const result = await communityService.joinCommunity(targetCommunityId, userId, role);
     res.json({
       message: 'Joined community successfully',
       ...result,
+      communityId: targetCommunityId,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to join community';
@@ -138,7 +156,7 @@ router.post('/:communityId/join', async (req: Request, res: Response) => {
  * 5. Leave a community
  * POST /api/communities/:communityId/leave
  */
-router.post('/:communityId/leave', async (req: Request, res: Response) => {
+router.post('/:communityId/leave', requireAuth, async (req: Request, res: Response) => {
   try {
     const communityId = req.params.communityId as string;
     const userId = req.user!.id;
@@ -197,7 +215,7 @@ router.get('/:communityId/channels/:channelId/messages', async (req: Request, re
  * 8. Send a message to a channel
  * POST /api/communities/:communityId/channels/:channelId/messages
  */
-router.post('/:communityId/channels/:channelId/messages', async (req: Request, res: Response) => {
+router.post('/:communityId/channels/:channelId/messages', requireAuth, async (req: Request, res: Response) => {
   try {
     const communityId = req.params.communityId as string;
     const channelId = req.params.channelId as string;
@@ -236,6 +254,7 @@ router.post('/:communityId/channels/:channelId/messages', async (req: Request, r
  */
 router.post(
   '/:communityId/channels/:channelId/messages/:messageId/reactions',
+  requireAuth,
   async (req: Request, res: Response) => {
     try {
       const communityId = req.params.communityId as string;

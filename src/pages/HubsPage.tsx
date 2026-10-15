@@ -73,8 +73,8 @@ export const HubsPage: React.FC<HubsPageProps> = ({
     voteAverage: 8.5,
     voteCount: hub.memberCount || 1,
     genres: [],
-    communityMembersCount: hub.memberCount || 1,
-    activeOnlineCount: Math.max(1, Math.floor(hub.memberCount * 0.2)),
+    communityMembersCount: hub.memberCount,
+    activeOnlineCount: undefined,
   });
 
   const filteredHubs = hubs.filter((hub) =>
@@ -112,8 +112,18 @@ export const HubsPage: React.FC<HubsPageProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search joined hubs..."
-                className="h-9 pl-9 pr-3 bg-[#201f1f] text-xs text-[#e5e2e1] placeholder:text-[#e9bcb6]/40 rounded-xl border border-[#353534] focus:border-[#e50914] focus:outline-none transition-colors"
+                className="h-9 pl-9 pr-8 bg-[#201f1f] text-xs text-[#e5e2e1] placeholder:text-[#e9bcb6]/40 rounded-xl border border-[#353534] focus:border-[#e50914] focus:outline-none transition-colors"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-2 text-[#e9bcb6]/60 hover:text-white p-0.5 rounded cursor-pointer"
+                  title="Clear search"
+                >
+                  <span className="material-symbols-outlined text-xs">close</span>
+                </button>
+              )}
             </div>
           </div>
         )}

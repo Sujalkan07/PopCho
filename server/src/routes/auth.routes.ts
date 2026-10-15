@@ -39,12 +39,13 @@ router.get('/me', async (req: Request, res: Response) => {
 
 /**
  * POST /api/auth/profile
- * Sync / upsert profile for authenticated user
+ * Sync / upsert profile for authenticated user.
+ * Role escalation is strictly prohibited: roles cannot be modified by user requests.
  */
 router.post('/profile', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    const { displayName, avatarUrl, username, role } = req.body;
+    const { displayName, avatarUrl, username } = req.body;
 
     const profile = await prisma.profile.upsert({
       where: { id: userId },
@@ -52,7 +53,6 @@ router.post('/profile', requireAuth, async (req: Request, res: Response) => {
         ...(displayName !== undefined && { displayName: String(displayName).trim() }),
         ...(avatarUrl !== undefined && { avatarUrl: String(avatarUrl).trim() }),
         ...(username !== undefined && { username: String(username).trim() }),
-        ...(role !== undefined && { role: String(role).trim() }),
       },
       create: {
         id: userId,
@@ -60,7 +60,7 @@ router.post('/profile', requireAuth, async (req: Request, res: Response) => {
         displayName: displayName ? String(displayName).trim() : req.user?.name || 'PopCho Fan',
         avatarUrl: avatarUrl ? String(avatarUrl).trim() : req.user?.avatar || null,
         username: username ? String(username).trim() : null,
-        role: role ? String(role).trim() : 'Community Member',
+        role: 'Community Member',
       },
     });
 
@@ -73,13 +73,22 @@ router.post('/profile', requireAuth, async (req: Request, res: Response) => {
 
 /**
  * GET /api/auth/profile/:id
- * Retrieve public profile for another user
+ * Retrieve sanitized public profile for another user.
+ * Private credentials such as email are strictly excluded.
  */
 router.get('/profile/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const profile = await prisma.profile.findUnique({
       where: { id },
+      select: {
+        id: true,
+        displayName: true,
+        username: true,
+        avatarUrl: true,
+        role: true,
+        createdAt: true,
+      },
     });
 
     if (!profile) {
