@@ -16,7 +16,17 @@ interface SocketUser {
 export function initSocketServer(httpServer: HttpServer, allowedOrigins: string[]) {
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: allowedOrigins,
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (
+          allowedOrigins.includes(origin) ||
+          /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+          (origin.endsWith('.vercel.app') && origin.includes('popcho'))
+        ) {
+          return callback(null, true);
+        }
+        return callback(new Error('CORS origin denied'), false);
+      },
       credentials: true,
       methods: ['GET', 'POST'],
     },

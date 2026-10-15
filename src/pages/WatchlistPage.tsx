@@ -19,7 +19,8 @@ interface WatchlistItem {
   createdAt: string;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+const API_BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl.slice(0, -4) : rawApiUrl;
 
 export const WatchlistPage: React.FC<WatchlistPageProps> = ({
   onJoinHub,

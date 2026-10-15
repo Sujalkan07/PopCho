@@ -182,7 +182,7 @@ const isMainModule =
   );
 
 if (isMainModule) {
-  httpServer.listen(config.port, () => {
+  httpServer.listen(config.port, '0.0.0.0', () => {
     const diagnostics = getSafeConfigDiagnostics();
     console.log(`[PopCho Server] Listening on http://localhost:${diagnostics.port}`);
     console.log(`[PopCho Server] TMDB Auth Mode: ${diagnostics.tmdbAuthMode} (Configured: ${diagnostics.tmdbConfigured})`);

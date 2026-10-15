@@ -16,7 +16,8 @@ import { WatchlistPage } from './pages/WatchlistPage';
 import { HubsPage } from './pages/HubsPage';
 import type { MediaItem } from './services/tmdb/types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+const API_BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl.slice(0, -4) : rawApiUrl;
 
 export function AppContent() {
   const [searchQuery, setSearchQuery] = useState('');
