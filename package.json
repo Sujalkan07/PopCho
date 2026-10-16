@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:server": "npm --prefix server install --include=dev && npm --prefix server run prisma:generate && npm --prefix server run build",
+    "start:server": "npm --prefix server start",
+    "prisma:deploy": "npm --prefix server run prisma:deploy"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
