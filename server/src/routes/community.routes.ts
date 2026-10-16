@@ -52,7 +52,7 @@ router.get('/lookup', async (req: Request, res: Response) => {
     const fallbackBackdrop = req.query.backdrop as string | undefined;
     const fallbackOverview = req.query.overview as string | undefined;
 
-    const community = await communityService.lookupCommunityReadOnly({
+    const community = await communityService.findOrCreateCommunity({
       tmdbId,
       mediaType,
       fallbackTitle,
@@ -61,7 +61,7 @@ router.get('/lookup', async (req: Request, res: Response) => {
       fallbackOverview,
     });
 
-    const membership = (community.isPersisted && req.user)
+    const membership = (community && req.user)
       ? await communityService.getMembershipStatus(community.id, req.user.id)
       : { isMember: false, role: null };
 
@@ -198,9 +198,14 @@ router.get('/:communityId/channels/:channelId/messages', async (req: Request, re
     const limit = Number(req.query.limit) || 50;
     const before = req.query.before as string | undefined;
 
+    // Gracefully handle virtual/preview IDs
+    if (communityId.startsWith('virtual-') || channelId.startsWith('preview-') || channelId.startsWith('ch-')) {
+      return res.json({ messages: [] });
+    }
+
     const isChannelValid = await chatService.verifyChannelInCommunity(communityId, channelId);
     if (!isChannelValid) {
-      return res.status(404).json({ error: 'Channel does not belong to the specified community' });
+      return res.json({ messages: [] });
     }
 
     const messages = await chatService.getChannelMessages(channelId, { limit, before });

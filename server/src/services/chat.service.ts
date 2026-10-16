@@ -95,10 +95,23 @@ export class ChatService {
    * Get single channel by ID
    */
   async getChannelById(channelId: string) {
-    return prisma.channel.findUnique({
+    const channel = await prisma.channel.findUnique({
       where: { id: channelId },
       include: { community: true },
     });
+    if (channel) return channel;
+
+    // Fallback: If channelId is a preview or fallback string, match by slug
+    if (channelId.includes('gen') || channelId.includes('theor') || channelId.includes('spoil') || channelId.startsWith('ch-')) {
+      const slug = channelId.includes('theor') ? 'theories' : channelId.includes('spoil') ? 'spoilers' : 'general';
+      const fallbackChannel = await prisma.channel.findFirst({
+        where: { slug },
+        include: { community: true },
+      });
+      if (fallbackChannel) return fallbackChannel;
+    }
+
+    return null;
   }
 
   /**
@@ -191,16 +204,24 @@ export class ChatService {
     }
 
     // Verify channel exists
-    const channel = await prisma.channel.findUnique({
+    let channel = await prisma.channel.findUnique({
       where: { id: params.channelId },
     });
+    if (!channel) {
+      if (params.channelId.includes('theor') || params.channelId.includes('spoil') || params.channelId.includes('gen') || params.channelId.startsWith('ch-')) {
+        const slug = params.channelId.includes('theor') ? 'theories' : params.channelId.includes('spoil') ? 'spoilers' : 'general';
+        channel = await prisma.channel.findFirst({
+          where: { slug },
+        });
+      }
+    }
     if (!channel) {
       throw new Error('Channel not found');
     }
 
     const message = await prisma.message.create({
       data: {
-        channelId: params.channelId,
+        channelId: channel.id,
         userId: params.userId,
         content: cleanContent,
         isSpoiler: Boolean(params.isSpoiler),
