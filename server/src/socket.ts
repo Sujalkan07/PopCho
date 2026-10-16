@@ -21,7 +21,7 @@ export function initSocketServer(httpServer: HttpServer, allowedOrigins: string[
         if (
           allowedOrigins.includes(origin) ||
           /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-          (origin.endsWith('.vercel.app') && origin.includes('popcho'))
+          origin.endsWith('.vercel.app')
         ) {
           return callback(null, true);
         }

@@ -25,6 +25,8 @@ const app = express();
 
 const allowedOrigins = [
   config.clientUrl,
+  'https://pop-cho.vercel.app',
+  'https://popcho.vercel.app',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:5000',
@@ -40,7 +42,7 @@ app.use(
       if (
         allowedOrigins.includes(origin) ||
         /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-        (origin.endsWith('.vercel.app') && origin.includes('popcho'))
+        origin.endsWith('.vercel.app')
       ) {
         return callback(null, true);
       }
