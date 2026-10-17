@@ -55,7 +55,7 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
   initialChannelId,
   onBackToDashboard,
 }) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'chat' | 'theories' | 'reviews'>('chat');
   const [communityRecord, setCommunityRecord] = useState<CommunityRecord | null>(null);
   const initialChannels = generateShowFallbackChannels(show);
@@ -828,44 +828,76 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
                 <span className="material-symbols-outlined text-sm text-[#e9bcb6]/70">filter_list</span>
               </div>
 
-              {/* Admins & Mods */}
+              {/* Admins & Moderators */}
               <div className="space-y-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-[#e9bcb6]/60">
-                  Admins &amp; Mods — 3
+                  Community Moderators
                 </span>
                 <div className="flex items-center gap-2.5 p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors cursor-pointer">
                   <div className="relative">
                     <img
-                      src="https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=100&q=80"
-                      alt="Eleven"
+                      src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80"
+                      alt="Community Mod"
                       className="w-7 h-7 rounded-full object-cover ring-1 ring-[#353534]"
                     />
                     <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-[#70dc8e]" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-[#e50914] truncate">@ElevenEggos</p>
-                    <p className="text-[10px] text-[#e9bcb6]/70 truncate">Managing Chapter 5 Leaks</p>
+                    <p className="text-xs font-bold text-[#e50914] truncate">
+                      @{show.title.replace(/[^a-zA-Z0-9]/g, '') || 'Community'}Mod
+                    </p>
+                    <p className="text-[10px] text-[#e9bcb6]/70 truncate">
+                      Moderating #{activeChannel.name}
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {/* Top Theorists */}
+              {/* Active Fans & Theorists */}
               <div className="space-y-2 pt-2 border-t border-[#353534]/50">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-[#e9bcb6]/60">
-                  Top Theorists — 8
+                  Active Theorists &amp; Members
                 </span>
+                {user && (
+                  <div className="flex items-center gap-2.5 p-1.5 rounded-lg bg-[#2a2a2a]/60 border border-[#353534]/60">
+                    <div className="relative">
+                      <img
+                        src={profile?.avatarUrl || (user.user_metadata?.avatar_url as string) || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&q=80'}
+                        alt={profile?.displayName || (user.user_metadata?.display_name as string) || 'You'}
+                        className="w-7 h-7 rounded-full object-cover ring-1 ring-[#e50914]"
+                      />
+                      <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-[#70dc8e]" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-bold text-[#e5e2e1] truncate">
+                          @{((profile?.displayName || profile?.username || (user.user_metadata?.display_name as string) || user.email?.split('@')[0] || 'You') as string).replace(/^@+/, '').replace(/\s+/g, '')}
+                        </p>
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#e50914]/20 text-[#ffb4aa]">
+                          You
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-[#70dc8e] truncate">Active in #{activeChannel.name}</p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2.5 p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors cursor-pointer">
                   <div className="relative">
                     <img
-                      src="https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=100&q=80"
-                      alt="Dustin"
+                      src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=100&q=80"
+                      alt="Theorist"
                       className="w-7 h-7 rounded-full object-cover ring-1 ring-[#353534]"
                     />
                     <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-[#70dc8e]" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-[#e5e2e1] truncate">@DustinHendersonHat</p>
-                    <p className="text-[10px] text-[#e9bcb6]/70 truncate">Analyzing Creel grandfather clock</p>
+                    <p className="text-xs font-bold text-[#e5e2e1] truncate">
+                      @{show.title.replace(/[^a-zA-Z0-9]/g, '') || 'Fan'}Scholar
+                    </p>
+                    <p className="text-[10px] text-[#e9bcb6]/70 truncate">
+                      Analyzing {show.title} lore &amp; clues
+                    </p>
                   </div>
                 </div>
               </div>

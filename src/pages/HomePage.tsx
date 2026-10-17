@@ -1381,7 +1381,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                           />
                           <div className="min-w-0">
                             <div className="text-xs font-bold text-[#e5e2e1] truncate">
-                              @{theorist.username || theorist.displayName.replace(/\s+/g, '')}
+                              @{(theorist.username || theorist.displayName || '').replace(/^@+/, '').replace(/\s+/g, '')}
                             </div>
                             <div className="text-[10px] text-[#e9bcb6]/70 truncate">
                               {theorist.activitySummary || theorist.badge || 'Active Theorist'}
@@ -1389,7 +1389,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                           </div>
                         </div>
                         <span className="text-xs text-[#70dc8e] font-bold shrink-0 ml-2">
-                          +{theorist.formattedPoints || theorist.points.toLocaleString()} pts
+                          +{theorist.points?.toLocaleString() ?? 0} pts
                         </span>
                       </div>
                     ))

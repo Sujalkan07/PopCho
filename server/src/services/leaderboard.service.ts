@@ -185,6 +185,7 @@ export class LeaderboardService {
 
       const prof = profileMap.get(st.userId);
       const name = prof?.displayName || prof?.username || `User_${st.userId.slice(0, 6)}`;
+      const cleanName = name.replace(/^@+/, '').trim();
       const role = prof?.role || (st.reviewsCount > 0 ? 'Community Critic' : 'Community Member');
 
       let activitySummary = '';
@@ -202,8 +203,8 @@ export class LeaderboardService {
 
       return {
         userId: st.userId,
-        displayName: name.startsWith('@') ? name : `@${name}`,
-        username: prof?.username || null,
+        displayName: cleanName,
+        username: prof?.username ? prof.username.replace(/^@+/, '').trim() : cleanName,
         avatarUrl: prof?.avatarUrl || DEFAULT_AVATAR,
         role,
         badge: deriveBadge(role),

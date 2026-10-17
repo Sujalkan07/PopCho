@@ -22,6 +22,7 @@ import { initSocketServer } from './socket.js';
 import prisma from './db/prisma.js';
 import { tmdbService } from './services/tmdb.service.js';
 import { leaderboardService } from './services/leaderboard.service.js';
+import { ensureDatabaseSchema } from './db/migrate.js';
 
 const app = express();
 
@@ -205,6 +206,11 @@ if (isMainModule) {
     console.log(`[PopCho Server] TMDB Auth Mode: ${diagnostics.tmdbAuthMode} (Configured: ${diagnostics.tmdbConfigured})`);
     console.log(`[PopCho Server] Database Configured: ${diagnostics.databaseConfigured}`);
     console.log(`[PopCho Server] Real-time messaging active with Socket.IO`);
+
+    // Self-heal and verify database schema asynchronously
+    ensureDatabaseSchema().catch((err) => {
+      console.warn('[PopCho Server] Initial schema verification notice:', err);
+    });
   });
 }
 

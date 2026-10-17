@@ -1,4 +1,5 @@
 import { prisma } from '../db/prisma.js';
+import { ensureDatabaseSchema } from '../db/migrate.js';
 
 export interface FormattedReaction {
   emoji: string;
@@ -132,6 +133,7 @@ export class ChatService {
    * Get messages for a channel with pagination (newest messages first, returned in chronological order)
    */
   async getChannelMessages(channelId: string, options: { limit?: number; before?: string }) {
+    await ensureDatabaseSchema();
     const limit = Math.min(100, Math.max(1, Number(options.limit) || 50));
 
     const where: Record<string, unknown> = { channelId };
@@ -146,14 +148,33 @@ export class ChatService {
     }
 
     // Query newest messages first
-    const messages = await prisma.message.findMany({
-      where,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        reactions: true,
-      },
-    });
+    let messages: any[] = [];
+    try {
+      messages = await prisma.message.findMany({
+        where,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          reactions: true,
+        },
+      });
+    } catch (err: unknown) {
+      console.warn('[ChatService] getChannelMessages query notice:', err);
+      await ensureDatabaseSchema();
+      try {
+        messages = await prisma.message.findMany({
+          where,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            reactions: true,
+          },
+        });
+      } catch (retryErr) {
+        console.error('[ChatService] getChannelMessages retry failed:', retryErr);
+        return [];
+      }
+    }
 
     const userIds = Array.from(new Set(messages.map((m) => m.userId)));
     let profileMap = new Map<
@@ -351,6 +372,7 @@ export class ChatService {
    * Ensure initial high-signal community discussions exist in PostgreSQL
    */
   async ensureSeedDiscussions() {
+    await ensureDatabaseSchema();
     try {
       const existingSubstantial = await prisma.message.count({
         where: {
@@ -519,31 +541,74 @@ export class ChatService {
           { createdAt: 'desc' as const },
         ];
 
-    const [total, rawMessages] = await Promise.all([
-      prisma.message.count({
-        where: { parentId: null },
-      }),
-      prisma.message.findMany({
-        where: { parentId: null },
-        orderBy,
-        skip,
-        take: limit,
-        include: {
-          channel: {
+    let total = 0;
+    let rawMessages: any[] = [];
+    try {
+      [total, rawMessages] = await Promise.all([
+        prisma.message.count({
+          where: { parentId: null },
+        }),
+        prisma.message.findMany({
+          where: { parentId: null },
+          orderBy,
+          skip,
+          take: limit,
+          include: {
+            channel: {
+              include: {
+                community: true,
+              },
+            },
+            reactions: true,
+            _count: {
+              select: {
+                replies: true,
+                reactions: true,
+              },
+            },
+          },
+        }),
+      ]);
+    } catch (err: unknown) {
+      console.warn('[ChatService] getPulseDiscussions query notice:', err);
+      await ensureDatabaseSchema();
+      try {
+        [total, rawMessages] = await Promise.all([
+          prisma.message.count({
+            where: { parentId: null },
+          }),
+          prisma.message.findMany({
+            where: { parentId: null },
+            orderBy,
+            skip,
+            take: limit,
             include: {
-              community: true,
-            },
-          },
-          reactions: true,
-          _count: {
-            select: {
-              replies: true,
+              channel: {
+                include: {
+                  community: true,
+                },
+              },
               reactions: true,
+              _count: {
+                select: {
+                  replies: true,
+                  reactions: true,
+                },
+              },
             },
-          },
-        },
-      }),
-    ]);
+          }),
+        ]);
+      } catch (retryErr) {
+        console.error('[ChatService] getPulseDiscussions retry failed:', retryErr);
+        return {
+          page,
+          limit,
+          total: 0,
+          hasMore: false,
+          discussions: [],
+        };
+      }
+    }
 
     // Batch lookup author profiles
     const userIds = Array.from(new Set(rawMessages.map((m) => m.userId)));
@@ -561,12 +626,12 @@ export class ChatService {
         'https://lh3.googleusercontent.com/aida-public/AB6AXuBmNfypXexpUqGV6ruN3XC8n2OqYyfzM-rHCYQH9eIHwRrMERZmMPSMVhkWDh7lAeFDaMoIKQEcn8pdfMMGDKqiI4PsbTQxIEly40c9OC_7jeis6uUX0Xmau1lUS3kAo7bw8bA67k1U1vhNTC8RwMbUTFVgQAOvm-N4cKCenSDe7FIT_9PVezInr_GDwS61-H7-0B_F9PO1zaeOr3XWdla-rkuVL8j2MXny0EU59iaaB5L157FxLwbvqw';
 
       const isLiked = options.currentUserId
-        ? msg.reactions.some((r) => r.userId === options.currentUserId && (r.emoji === '❤️' || r.emoji === 'like'))
+        ? (msg.reactions || []).some((r: { userId: string; emoji: string }) => r.userId === options.currentUserId && (r.emoji === '❤️' || r.emoji === 'like'))
         : false;
 
       // Group reactions
       const reactionMap = new Map<string, string[]>();
-      for (const r of msg.reactions) {
+      for (const r of (msg.reactions || []) as Array<{ userId: string; emoji: string }>) {
         const users = reactionMap.get(r.emoji) || [];
         users.push(r.userId);
         reactionMap.set(r.emoji, users);
