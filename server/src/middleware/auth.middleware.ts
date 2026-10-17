@@ -49,29 +49,45 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
             const u = data.user;
             const meta = u.user_metadata || {};
             const name = meta.full_name || meta.name || u.email?.split('@')[0] || 'PopCho Fan';
-            const avatar = meta.avatar_url || meta.picture || DEFAULT_DEV_USER.avatar;
+            const metaAvatar = meta.avatar_url || meta.picture || null;
 
             let role = 'Community Member';
+            let effectiveAvatar = metaAvatar;
 
-            // Synchronize profile and resolve server-authoritative role
+            // Synchronize profile and resolve server-authoritative role & avatar
             try {
-              const profile = await prisma.profile.upsert({
+              let profile = await prisma.profile.findUnique({
                 where: { id: u.id },
-                update: {
-                  email: u.email,
-                  displayName: name,
-                  avatarUrl: avatar,
-                },
-                create: {
-                  id: u.id,
-                  email: u.email,
-                  displayName: name,
-                  avatarUrl: avatar,
-                  role: 'Community Member',
-                },
               });
+
+              if (!profile) {
+                profile = await prisma.profile.create({
+                  data: {
+                    id: u.id,
+                    email: u.email || null,
+                    displayName: name,
+                    avatarUrl: metaAvatar,
+                    role: 'Community Member',
+                  },
+                });
+              } else {
+                // If profile already exists, NEVER overwrite user's saved avatarUrl!
+                const updates: Record<string, string> = {};
+                if (u.email && profile.email !== u.email) updates.email = u.email;
+                if (name && !profile.displayName) updates.displayName = name;
+                if (Object.keys(updates).length > 0) {
+                  profile = await prisma.profile.update({
+                    where: { id: u.id },
+                    data: updates,
+                  });
+                }
+              }
+
               if (profile?.role) {
                 role = profile.role;
+              }
+              if (profile?.avatarUrl) {
+                effectiveAvatar = profile.avatarUrl;
               }
             } catch {
               // Silently ignore profile sync errors so request is not blocked
@@ -80,7 +96,7 @@ export async function authMiddleware(req: Request, _res: Response, next: NextFun
             req.user = {
               id: u.id,
               name,
-              avatar,
+              avatar: effectiveAvatar || '',
               role,
               email: u.email,
             };

@@ -72,6 +72,51 @@ router.post('/profile', requireAuth, async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/auth/avatar
+ * Dedicated endpoint to update and confirm user avatar selection during onboarding or settings.
+ */
+router.post('/avatar', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { avatarUrl, avatarSource, avatarMediaId, avatarCharacter, avatarTitle } = req.body;
+
+    if (!avatarUrl || typeof avatarUrl !== 'string' || !avatarUrl.trim()) {
+      return res.status(400).json({ error: 'Valid avatarUrl is required' });
+    }
+
+    const cleanAvatarUrl = avatarUrl.trim();
+
+    const profile = await prisma.profile.upsert({
+      where: { id: userId },
+      update: {
+        avatarUrl: cleanAvatarUrl,
+      },
+      create: {
+        id: userId,
+        email: req.user?.email || null,
+        displayName: req.user?.name || 'PopCho Fan',
+        avatarUrl: cleanAvatarUrl,
+        role: 'Community Member',
+      },
+    });
+
+    res.json({
+      success: true,
+      profile: {
+        ...profile,
+        avatarSource: avatarSource || null,
+        avatarMediaId: avatarMediaId || null,
+        avatarCharacter: avatarCharacter || null,
+        avatarTitle: avatarTitle || null,
+      },
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to save avatar';
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
  * GET /api/auth/profile/:id
  * Retrieve sanitized public profile for another user.
  * Private credentials such as email are strictly excluded.

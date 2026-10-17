@@ -30,6 +30,14 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   getAuthHeaders: () => Record<string, string>;
   refreshProfile: () => Promise<void>;
+  hasSavedAvatar: boolean;
+  updateAvatar: (avatarData: {
+    avatarUrl: string;
+    avatarSource?: string;
+    avatarMediaId?: string;
+    avatarCharacter?: string;
+    avatarTitle?: string;
+  }) => Promise<{ error: Error | null; profile?: UserProfile }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -94,7 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: user.id,
         email: user.email,
         displayName: meta.full_name || meta.name || user.email?.split('@')[0] || 'PopCho Fan',
-        avatarUrl: meta.avatar_url || meta.picture || 'https://lh3.googleusercontent.com/aida-public/AB6AXuBmNfypXexpUqGV6ruN3XC8n2OqYyfzM-rHCYQH9eIHwRrMERZmMPSMVhkWDh7lAeFDaMoIKQEcn8pdfMMGDKqiI4PsbTQxIEly40c9OC_7jeis6uUX0Xmau1lUS3kAo7bw8bA67k1U1vhNTC8RwMbUTFVgQAOvm-N4cKCenSDe7FIT_9PVezInr_GDwS61-H7-0B_F9PO1zaeOr3XWdla-rkuVL8j2MXny0EU59iaaB5L157FxLwbvqw',
+        avatarUrl: meta.avatar_url || meta.picture || null,
         role: 'Community Member',
       });
     }
@@ -243,6 +251,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null);
   };
 
+  const updateAvatar = async (avatarData: {
+    avatarUrl: string;
+    avatarSource?: string;
+    avatarMediaId?: string;
+    avatarCharacter?: string;
+    avatarTitle?: string;
+  }) => {
+    if (!session?.access_token) {
+      return { error: new Error('You must be signed in to save an avatar.') };
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/avatar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(avatarData),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to save avatar');
+      }
+
+      const data = await res.json();
+      if (data.profile) {
+        setProfile(data.profile);
+      }
+      return { error: null, profile: data.profile };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to save avatar';
+      return { error: new Error(msg) };
+    }
+  };
+
+  const hasSavedAvatar = Boolean(profile?.avatarUrl && profile.avatarUrl.trim().length > 0);
+
   return (
     <AuthContext.Provider
       value={{
@@ -261,6 +308,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut,
         getAuthHeaders,
         refreshProfile,
+        hasSavedAvatar,
+        updateAvatar,
       }}
     >
       {children}

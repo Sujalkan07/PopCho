@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import { communityService } from '../services/community.service.js';
 import { chatService } from '../services/chat.service.js';
+import { leaderboardService } from '../services/leaderboard.service.js';
+import { broadcastPulseEvent } from '../socket.js';
 import { authMiddleware, requireAuth } from '../middleware/auth.middleware.js';
 
 const router = Router();
@@ -52,7 +54,7 @@ router.get('/lookup', async (req: Request, res: Response) => {
     const fallbackBackdrop = req.query.backdrop as string | undefined;
     const fallbackOverview = req.query.overview as string | undefined;
 
-    const community = await communityService.findOrCreateCommunity({
+    const community = await communityService.lookupCommunityReadOnly({
       tmdbId,
       mediaType,
       fallbackTitle,
@@ -61,7 +63,7 @@ router.get('/lookup', async (req: Request, res: Response) => {
       fallbackOverview,
     });
 
-    const membership = (community && req.user)
+    const membership = (community && community.isPersisted && req.user)
       ? await communityService.getMembershipStatus(community.id, req.user.id)
       : { isMember: false, role: null };
 
@@ -86,6 +88,126 @@ router.get('/user/hubs', requireAuth, async (req: Request, res: Response) => {
     res.json({ hubs, count: hubs.length });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to retrieve user hubs';
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * 2.6 Community Pulse Feed (Real community discussions across shows)
+ * GET /api/communities/pulse
+ */
+router.get('/pulse', async (req: Request, res: Response) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = req.query.limit !== undefined ? Number(req.query.limit) || 4 : 4;
+    const sortBy = (req.query.sortBy as string) === 'recent' ? 'recent' : 'likes';
+    const currentUserId = req.user?.id;
+
+    const data = await chatService.getPulseDiscussions({ page, limit, sortBy, currentUserId });
+    res.json(data);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to retrieve pulse feed';
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * 2.7 Get replies for a discussion
+ * GET /api/communities/pulse/:id/replies
+ */
+router.get('/pulse/:id/replies', async (req: Request, res: Response) => {
+  try {
+    const discussionId = req.params.id as string;
+    const currentUserId = req.user?.id;
+    const replies = await chatService.getDiscussionReplies(discussionId, currentUserId);
+    res.json({ replies });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to retrieve replies';
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * 2.8 Submit a reply to a discussion
+ * POST /api/communities/pulse/:id/replies
+ */
+router.post('/pulse/:id/replies', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const discussionId = req.params.id as string;
+    const { content } = req.body;
+    const user = req.user!;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'Reply content cannot be empty' });
+    }
+
+    const result = await chatService.createDiscussionReply(discussionId, user.id, content, user);
+    broadcastPulseEvent('pulse_reply_created', {
+      discussionId,
+      reply: result.reply,
+      replyCount: result.replyCount,
+    });
+    res.status(201).json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to submit reply';
+    res.status(400).json({ error: msg });
+  }
+});
+
+/**
+ * 2.9 Toggle like on a discussion
+ * POST /api/communities/pulse/:id/like
+ */
+router.post('/pulse/:id/like', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const discussionId = req.params.id as string;
+    const user = req.user!;
+
+    const result = await chatService.togglePulseLike(discussionId, user.id);
+    broadcastPulseEvent('pulse_reaction_updated', {
+      discussionId: result.messageId,
+      isLiked: result.isLiked,
+      likeCount: result.likeCount,
+    });
+    res.json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to toggle like';
+    res.status(400).json({ error: msg });
+  }
+});
+
+/**
+ * 2.10 Delete a discussion (enforces server ownership)
+ * DELETE /api/communities/pulse/:id
+ */
+router.delete('/pulse/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const discussionId = req.params.id as string;
+    const user = req.user!;
+
+    const result = await chatService.deletePulseDiscussion(discussionId, user.id);
+    broadcastPulseEvent('pulse_post_deleted', { discussionId });
+    res.json(result);
+  } catch (err: unknown) {
+    const status = (err as { statusCode?: number })?.statusCode || 500;
+    const msg = err instanceof Error ? err.message : 'Failed to delete discussion';
+    res.status(status).json({ error: msg });
+  }
+});
+
+/**
+ * 2.11 Top Theorists Leaderboard (Calculated transparently from recorded database activity)
+ * GET /api/communities/leaderboard
+ */
+router.get('/leaderboard', async (req: Request, res: Response) => {
+  try {
+    const period = req.query.period === 'all' ? 'all' : 'week';
+    const limit = Number(req.query.limit) || 5;
+
+    const data = await leaderboardService.getLeaderboard(period, limit);
+    res.json(data);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to retrieve leaderboard';
     res.status(500).json({ error: msg });
   }
 });

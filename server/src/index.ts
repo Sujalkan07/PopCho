@@ -16,10 +16,12 @@ import communityRoutes from './routes/community.routes.js';
 import reviewRoutes from './routes/review.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import watchlistRoutes from './routes/watchlist.routes.js';
+import avatarRoutes from './routes/avatar.routes.js';
 import { authMiddleware } from './middleware/auth.middleware.js';
 import { initSocketServer } from './socket.js';
 import prisma from './db/prisma.js';
 import { tmdbService } from './services/tmdb.service.js';
+import { leaderboardService } from './services/leaderboard.service.js';
 
 const app = express();
 
@@ -159,6 +161,19 @@ app.use('/api/communities', communityRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/watchlist', watchlistRoutes);
+app.use('/api/avatars', avatarRoutes);
+
+app.get('/api/leaderboard', async (req: Request, res: Response) => {
+  try {
+    const period = req.query.period === 'all' ? 'all' : 'week';
+    const limit = Number(req.query.limit) || 5;
+    const data = await leaderboardService.getLeaderboard(period, limit);
+    res.json(data);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to retrieve leaderboard';
+    res.status(500).json({ error: msg });
+  }
+});
 
 // Global Error Handler
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

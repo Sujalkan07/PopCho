@@ -116,9 +116,15 @@ export class ReviewService {
     let orderBy: any = { createdAt: 'desc' };
 
     // Active Filter handling
-    if (query.filter === '5-star' || query.filter === '★ 5-Star Masterpieces') {
+    if (query.filter === 'week' || query.filter === 'This Week') {
+      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      where.createdAt = { gte: oneWeekAgo };
+      orderBy = { createdAt: 'desc' };
+    } else if (query.filter === 'all' || query.filter === 'All Time') {
+      orderBy = { createdAt: 'desc' };
+    } else if (query.filter === '5-star' || query.filter === '★ 5-Star Masterpieces') {
       where.rating = { gte: 5.0 };
-    } else if (query.filter === 'most-helpful' || query.filter === 'Most Helpful') {
+    } else if (query.filter === 'most-helpful' || query.filter === 'helpful' || query.filter === 'Most Helpful') {
       orderBy = [{ helpfulCount: 'desc' }, { createdAt: 'desc' }];
     } else if (query.filter === 'season-finales' || query.filter === 'Season Finales') {
       where.OR = [

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { HomePage } from './pages/HomePage';
 import { DiscoverPage } from './pages/DiscoverPage';
 import { CommunityReviewsPage } from './pages/CommunityReviewsPage';
 import { CommunitiesPage } from './pages/CommunitiesPage';
+import { AvatarOnboardingPage } from './pages/AvatarOnboardingPage';
 import { RequestHubModal } from './components/directory/RequestHubModal';
 import { ReviewsModal } from './components/reviews/ReviewsModal';
 import { JoinHubModal } from './components/chat/JoinHubModal';
@@ -20,10 +21,21 @@ const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, ''
 const API_BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl.slice(0, -4) : rawApiUrl;
 
 export function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, profile, isLoading, hasSavedAvatar, getAuthHeaders } = useAuth();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [notificationToast, setNotificationToast] = useState<string | null>(null);
 
-  const { user, getAuthHeaders } = useAuth();
+  const isOnboardingRoute = location.pathname === '/onboarding/avatar';
+
+  // Automatically enforce avatar onboarding for authenticated users who have not saved an avatar
+  useEffect(() => {
+    if (!isLoading && user && profile && !hasSavedAvatar && !isOnboardingRoute) {
+      navigate('/onboarding/avatar', { replace: true, state: { from: location.pathname } });
+    }
+  }, [isLoading, user, profile, hasSavedAvatar, isOnboardingRoute, navigate, location.pathname]);
 
   // Bookmarked show IDs strictly scoped to authenticated user or guest to prevent cross-account leaks
   const [bookmarkedIds, setBookmarkedIds] = useState<Record<string | number, boolean>>(() => {
@@ -177,6 +189,11 @@ export function AppContent() {
     );
   }
 
+  // Dedicated Avatar Selection Onboarding View (Stitch Approved Design)
+  if (isOnboardingRoute) {
+    return <AvatarOnboardingPage />;
+  }
+
   return (
     <div className="min-h-screen bg-[#131313] text-[#e5e2e1] flex flex-col antialiased selection:bg-[#e50914] selection:text-white">
       {/* Toast Notification */}
@@ -281,6 +298,7 @@ export function AppContent() {
               />
             }
           />
+          <Route path="/onboarding/avatar" element={<AvatarOnboardingPage />} />
           {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

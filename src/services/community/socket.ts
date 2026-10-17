@@ -172,3 +172,42 @@ export function emitToggleReaction(
     );
   });
 }
+
+export function subscribeToPulseReactions(
+  callback: (data: { discussionId: string; isLiked: boolean; likeCount: number }) => void
+): () => void {
+  const s = getCommunitySocket();
+  const handler = (data: { discussionId: string; isLiked: boolean; likeCount: number }) => {
+    callback(data);
+  };
+  s.on('pulse_reaction_updated', handler);
+  return () => {
+    s.off('pulse_reaction_updated', handler);
+  };
+}
+
+export function subscribeToPulseReplies(
+  callback: (data: { discussionId: string; reply: unknown; replyCount: number }) => void
+): () => void {
+  const s = getCommunitySocket();
+  const handler = (data: { discussionId: string; reply: unknown; replyCount: number }) => {
+    callback(data);
+  };
+  s.on('pulse_reply_created', handler);
+  return () => {
+    s.off('pulse_reply_created', handler);
+  };
+}
+
+export function subscribeToPulseDeletions(
+  callback: (data: { discussionId: string }) => void
+): () => void {
+  const s = getCommunitySocket();
+  const handler = (data: { discussionId: string }) => {
+    callback(data);
+  };
+  s.on('pulse_post_deleted', handler);
+  return () => {
+    s.off('pulse_post_deleted', handler);
+  };
+}

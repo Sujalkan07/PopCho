@@ -1,8 +1,31 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import type { MediaItem } from '../services/tmdb/types';
 import { getTrendingTvShows } from '../services/tmdb/tv';
 import { DEFAULT_BACKDROP, DEFAULT_POSTER } from '../services/tmdb/client';
 import { ShowCard } from '../components/directory/ShowCard';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  getPulseDiscussions,
+  getDiscussionReplies,
+  postDiscussionReply,
+  togglePulseDiscussionLike,
+  deletePulseDiscussion,
+  getTheoristLeaderboard,
+  type PulseDiscussion,
+  type DiscussionReply,
+  type LeaderboardTheorist,
+} from '../services/community/api';
+import {
+  subscribeToPulseReactions,
+  subscribeToPulseReplies,
+  subscribeToPulseDeletions,
+} from '../services/community/socket';
+import {
+  listPopchoReviews,
+  toggleReviewHelpful,
+  type PopchoReview,
+} from '../services/review/api';
 
 interface HomePageProps {
   searchQuery?: string;
@@ -156,24 +179,288 @@ export const HomePage: React.FC<HomePageProps> = ({
     }
   };
 
-  // Pulse thread likes
-  const [threadLikes, setThreadLikes] = useState({
-    thread1: 482,
-    thread2: 319,
-    thread3: 204,
-  });
-  const [likedThreads, setLikedThreads] = useState<Record<string, boolean>>({});
+  const { user, openAuthModal } = useAuth();
 
-  const toggleThreadLike = (threadKey: 'thread1' | 'thread2' | 'thread3') => {
-    setLikedThreads((prev) => {
-      const isCurrentlyLiked = Boolean(prev[threadKey]);
-      const nextLiked = !isCurrentlyLiked;
-      setThreadLikes((current) => ({
-        ...current,
-        [threadKey]: nextLiked ? current[threadKey] + 1 : current[threadKey] - 1,
-      }));
-      return { ...prev, [threadKey]: nextLiked };
+  // =========================================================================
+  // LIVE FAN PULSE REAL STATE & INTERACTIONS
+  // =========================================================================
+  const [discussions, setDiscussions] = useState<PulseDiscussion[]>([]);
+  const [isLoadingPulse, setIsLoadingPulse] = useState<boolean>(true);
+  const [pulseError, setPulseError] = useState<string | null>(null);
+  const [pendingLikes, setPendingLikes] = useState<Record<string, boolean>>({});
+  const [activeOverflowMenuId, setActiveOverflowMenuId] = useState<string | null>(null);
+
+  // Reply Drawer / Modal State
+  const [activeReplyDiscussion, setActiveReplyDiscussion] = useState<PulseDiscussion | null>(null);
+  const [replies, setReplies] = useState<DiscussionReply[]>([]);
+  const [isLoadingReplies, setIsLoadingReplies] = useState<boolean>(false);
+  const [replyInputText, setReplyInputText] = useState<string>('');
+  const [isSubmittingReply, setIsSubmittingReply] = useState<boolean>(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+
+  const fetchPulse = useCallback(() => {
+    setIsLoadingPulse(true);
+    setPulseError(null);
+    getPulseDiscussions({ limit: 4, sortBy: 'likes' })
+      .then((data) => {
+        if (!isMountedRef.current) return;
+        setDiscussions((data.discussions || []).slice(0, 4));
+      })
+      .catch((err: unknown) => {
+        if (!isMountedRef.current) return;
+        const msg = err instanceof Error ? err.message : 'Unable to load community discussions.';
+        setPulseError(msg);
+      })
+      .finally(() => {
+        if (isMountedRef.current) {
+          setIsLoadingPulse(false);
+        }
+      });
+  }, []);
+
+  useEffect(() => {
+    fetchPulse();
+
+    // Real-time Socket.IO subscriptions for Live Fan Pulse
+    const unsubLikes = subscribeToPulseReactions(({ discussionId, isLiked, likeCount }) => {
+      setDiscussions((prev) =>
+        prev.map((d) => (d.id === discussionId ? { ...d, isLiked: user ? isLiked : false, likeCount } : d))
+      );
     });
+
+    const unsubReplies = subscribeToPulseReplies(({ discussionId, reply, replyCount }) => {
+      setDiscussions((prev) =>
+        prev.map((d) => (d.id === discussionId ? { ...d, replyCount } : d))
+      );
+      if (activeReplyDiscussion?.id === discussionId && reply) {
+        setReplies((prev) => {
+          if (prev.some((r) => r.id === (reply as DiscussionReply).id)) return prev;
+          return [...prev, reply as DiscussionReply];
+        });
+      }
+    });
+
+    const unsubDeletions = subscribeToPulseDeletions(({ discussionId }) => {
+      setDiscussions((prev) => prev.filter((d) => d.id !== discussionId));
+      if (activeReplyDiscussion?.id === discussionId) {
+        setActiveReplyDiscussion(null);
+      }
+    });
+
+    return () => {
+      unsubLikes();
+      unsubReplies();
+      unsubDeletions();
+    };
+  }, [fetchPulse, user, activeReplyDiscussion?.id]);
+
+  const handleTogglePulseLike = async (discussion: PulseDiscussion) => {
+    if (!user) {
+      openAuthModal();
+      setNotificationToast?.('Please sign in to react to discussions.');
+      return;
+    }
+    if (pendingLikes[discussion.id]) return;
+
+    setPendingLikes((prev) => ({ ...prev, [discussion.id]: true }));
+    const willBeLiked = !discussion.isLiked;
+    const nextCount = willBeLiked ? discussion.likeCount + 1 : Math.max(0, discussion.likeCount - 1);
+
+    // Optimistic UI update
+    setDiscussions((prev) =>
+      prev.map((d) => (d.id === discussion.id ? { ...d, isLiked: willBeLiked, likeCount: nextCount } : d))
+    );
+
+    try {
+      const res = await togglePulseDiscussionLike(discussion.id);
+      setDiscussions((prev) =>
+        prev.map((d) => (d.id === discussion.id ? { ...d, isLiked: res.isLiked, likeCount: res.likeCount } : d))
+      );
+    } catch {
+      // Revert on error
+      setDiscussions((prev) =>
+        prev.map((d) => (d.id === discussion.id ? { ...d, isLiked: discussion.isLiked, likeCount: discussion.likeCount } : d))
+      );
+      setNotificationToast?.('Failed to update like. Please try again.');
+    } finally {
+      setPendingLikes((prev) => ({ ...prev, [discussion.id]: false }));
+    }
+  };
+
+  const handleOpenReplies = async (discussion: PulseDiscussion) => {
+    setActiveReplyDiscussion(discussion);
+    setIsLoadingReplies(true);
+    setReplyError(null);
+    try {
+      const list = await getDiscussionReplies(discussion.id);
+      setReplies(list);
+    } catch {
+      setReplyError('Could not load replies. Please try again.');
+    } finally {
+      setIsLoadingReplies(false);
+    }
+  };
+
+  const handleSendReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      openAuthModal();
+      setNotificationToast?.('Please sign in to reply.');
+      return;
+    }
+    if (!activeReplyDiscussion) return;
+    const clean = replyInputText.trim();
+    if (!clean || isSubmittingReply) return;
+
+    setIsSubmittingReply(true);
+    setReplyError(null);
+
+    try {
+      const res = await postDiscussionReply(activeReplyDiscussion.id, clean);
+      setReplies((prev) => [...prev, res.reply]);
+      setDiscussions((prev) =>
+        prev.map((d) => (d.id === activeReplyDiscussion.id ? { ...d, replyCount: res.replyCount } : d))
+      );
+      setReplyInputText('');
+      setNotificationToast?.('Reply posted!');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to post reply.';
+      setReplyError(msg);
+    } finally {
+      setIsSubmittingReply(false);
+    }
+  };
+
+  const handleShareDiscussion = async (discussion: PulseDiscussion) => {
+    const shareUrl = `${window.location.origin}/discover?q=${encodeURIComponent(discussion.show.title)}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `${discussion.show.title} Discussion on PopCho`,
+          text: `"${discussion.content.slice(0, 120)}..."`,
+          url: shareUrl,
+        });
+        setNotificationToast?.('Discussion shared!');
+        return;
+      } catch {
+        // Fallback to clipboard
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setNotificationToast?.('Discussion link copied to clipboard!');
+    } catch {
+      setNotificationToast?.('Could not copy link automatically.');
+    }
+  };
+
+  const handleDeleteDiscussion = async (discussionId: string) => {
+    setActiveOverflowMenuId(null);
+    try {
+      await deletePulseDiscussion(discussionId);
+      setDiscussions((prev) => prev.filter((d) => d.id !== discussionId));
+      setNotificationToast?.('Discussion deleted.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete discussion.';
+      setNotificationToast?.(msg);
+    }
+  };
+
+  // Close overflow menu when clicking elsewhere
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && !target.closest('.discussion-overflow-container')) {
+        setActiveOverflowMenuId(null);
+      }
+    };
+    window.addEventListener('mousedown', handleOutsideClick);
+    return () => window.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  // =========================================================================
+  // WEEKLY TOP THEORISTS REAL LEADERBOARD STATE
+  // =========================================================================
+  const [theorists, setTheorists] = useState<LeaderboardTheorist[]>([]);
+  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState<boolean>(true);
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState<'week' | 'all'>('week');
+
+  useEffect(() => {
+    let isSubscribed = true;
+    setIsLoadingLeaderboard(true);
+
+    getTheoristLeaderboard(leaderboardPeriod, 5)
+      .then((data) => {
+        if (!isSubscribed) return;
+        setTheorists(data.theorists || []);
+      })
+      .catch((err) => {
+        console.warn('Leaderboard error:', err);
+        if (isSubscribed) setTheorists([]);
+      })
+      .finally(() => {
+        if (isSubscribed) setIsLoadingLeaderboard(false);
+      });
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [leaderboardPeriod]);
+
+  // =========================================================================
+  // FEATURED FAN REVIEWS REAL DATABASE STATE & FILTERING
+  // =========================================================================
+  const [featuredReviews, setFeaturedReviews] = useState<PopchoReview[]>([]);
+  const [isLoadingReviews, setIsLoadingReviews] = useState<boolean>(true);
+  const [reviewsError, setReviewsError] = useState<string | null>(null);
+  const [helpfulLikedIds, setHelpfulLikedIds] = useState<Record<string, boolean>>({});
+
+  const fetchReviews = useCallback((tab: 'week' | 'all' | 'helpful') => {
+    setIsLoadingReviews(true);
+    setReviewsError(null);
+
+    listPopchoReviews({ limit: 3, filter: tab })
+      .then((data) => {
+        if (!isMountedRef.current) return;
+        setFeaturedReviews(data.results || []);
+      })
+      .catch((err: unknown) => {
+        if (!isMountedRef.current) return;
+        const msg = err instanceof Error ? err.message : 'Unable to load reviews.';
+        setReviewsError(msg);
+      })
+      .finally(() => {
+        if (isMountedRef.current) {
+          setIsLoadingReviews(false);
+        }
+      });
+  }, []);
+
+  useEffect(() => {
+    fetchReviews(activeReviewTab);
+  }, [activeReviewTab, fetchReviews]);
+
+  const handleToggleReviewHelpful = async (reviewId: string) => {
+    if (!user) {
+      openAuthModal();
+      setNotificationToast?.('Please sign in to vote on reviews.');
+      return;
+    }
+
+    try {
+      const res = await toggleReviewHelpful(reviewId);
+      setHelpfulLikedIds((prev) => ({ ...prev, [reviewId]: res.isHelpfulLiked }));
+      setFeaturedReviews((prev) =>
+        prev.map((r) =>
+          r.id === reviewId ? { ...r, helpfulCount: res.helpfulCount, isHelpfulLiked: res.isHelpfulLiked } : r
+        )
+      );
+      setNotificationToast?.(
+        res.isHelpfulLiked ? 'Marked review as helpful!' : 'Removed helpful vote.'
+      );
+    } catch {
+      setNotificationToast?.('Failed to update helpful vote.');
+    }
   };
 
   // Top 5 trending TV shows for the cinematic hero slider
@@ -712,9 +999,14 @@ export const HomePage: React.FC<HomePageProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">⚡</span>
-                  <h2 className="text-xl sm:text-2xl font-bold text-[#e5e2e1]">
-                    Live Fan Pulse — Hot Discussions
-                  </h2>
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-bold text-[#e5e2e1]">
+                      Live Fan Pulse — Hot Discussions
+                    </h2>
+                    <p className="text-xs text-[#e9bcb6]/70">
+                      Top 4 most-liked community discussions across all fandoms
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-[#e9bcb6]">
                   <span className="w-2 h-2 rounded-full bg-[#70dc8e] animate-pulse" />
@@ -722,245 +1014,230 @@ export const HomePage: React.FC<HomePageProps> = ({
                 </div>
               </div>
 
-              {/* Pulse Thread Card 1 */}
-              <article className="p-4 sm:p-5 rounded-2xl bg-[#201f1f] hover:bg-[#252424] transition-all border border-[#353534] shadow-sm">
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <img
-                        className="w-10 h-10 rounded-full object-cover ring-1 ring-[#353534]"
-                        alt="@DufferFanatic"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuDH-t7vGqWvEjdY7gIYk78Mz067Z3OT5RRYwIy4oy4EdHpZv4DFkukoFFkmO9DVte04gYDKhOFYOazkMFBTW57BZR07sVpyr6oKY584FZD8r7qtNOtMB43ciT9EuZQWpIrm63RE4JnSgz_boJQl2-GTbW1Z0FpEeilRjjOk6HMNTNBkE0JTYE7XdawKRN6aYUfanqu-hs2QAl17sLdAzZgRPCQ39JZHP0Xg3GIp687fUOvXTMz23FTDYw"
-                      />
-                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#70dc8e] ring-2 ring-[#201f1f]" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-bold text-sm text-[#e5e2e1]">@DufferFanatic</span>
-                        <span className="px-1.5 py-0.5 rounded bg-[#e50914]/20 text-[#ffb4aa] text-[10px] font-bold">
-                          Top Theorist
-                        </span>
-                        <span className="text-xs text-[#e9bcb6]">in</span>
-                        <span className="text-xs font-semibold text-[#e5e2e1]">Stranger Things</span>
+              {isLoadingPulse ? (
+                /* Pulse Feed Loading Skeletons */
+                <div className="flex flex-col gap-4">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div
+                      key={`pulse-skel-${i}`}
+                      className="p-5 rounded-2xl bg-[#201f1f] border border-[#353534] animate-pulse"
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 rounded-full bg-[#2a2a2a]" />
+                        <div className="space-y-1.5 flex-1">
+                          <div className="h-3.5 w-32 bg-[#2a2a2a] rounded" />
+                          <div className="h-2.5 w-24 bg-[#2a2a2a] rounded" />
+                        </div>
                       </div>
-                      <span className="text-[11px] text-[#e9bcb6]/70">8 minutes ago • Hawkins Clocks</span>
+                      <div className="space-y-2 mb-4">
+                        <div className="h-3 w-full bg-[#2a2a2a] rounded" />
+                        <div className="h-3 w-4/5 bg-[#2a2a2a] rounded" />
+                      </div>
+                      <div className="h-4 w-28 bg-[#2a2a2a] rounded" />
                     </div>
-                  </div>
+                  ))}
+                </div>
+              ) : pulseError && discussions.length === 0 ? (
+                /* Pulse Feed Error State */
+                <div className="p-8 rounded-2xl bg-[#201f1f] border border-[#353534] text-center">
+                  <p className="text-sm text-[#e9bcb6] mb-3">{pulseError}</p>
                   <button
                     type="button"
-                    onClick={() => setNotificationToast?.('Thread actions: report, mute, save.')}
-                    className="text-[#e9bcb6] hover:text-white p-1 cursor-pointer"
+                    onClick={fetchPulse}
+                    className="px-4 py-2 rounded-xl bg-[#e50914] text-white font-bold text-xs hover:bg-[#b2000d] transition-all cursor-pointer"
                   >
-                    <span className="material-symbols-outlined text-lg">more_horiz</span>
+                    Retry Feed
                   </button>
                 </div>
-                <p className="text-xs sm:text-sm text-[#e5e2e1] mb-3 leading-relaxed">
-                  "Look at the grandfather clock chiming at exactly 14:02 in the S5 teaser. It matches Will's season 2 crayon drawing coordinates to the millimeter. There's no way that's a coincidence..."
-                </p>
-                <div className="flex items-center justify-between pt-1 border-t border-[#353534]/50">
-                  <div className="flex items-center gap-4 text-xs text-[#e9bcb6]">
-                    <button
-                      type="button"
-                      onClick={() => toggleThreadLike('thread1')}
-                      className={`flex items-center gap-1 transition-colors cursor-pointer ${
-                        likedThreads['thread1'] ? 'text-[#e50914]' : 'hover:text-[#e50914]'
-                      }`}
-                    >
-                      <span
-                        className="material-symbols-outlined text-base"
-                        style={{
-                          fontVariationSettings: likedThreads['thread1'] ? "'FILL' 1" : "'FILL' 0",
-                        }}
-                      >
-                        favorite
-                      </span>
-                      <span>{threadLikes.thread1}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNotificationToast?.('142 replies loaded.')}
-                      className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-base">chat_bubble</span>
-                      <span>142 replies</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(window.location.href);
-                        setNotificationToast?.('Discussion link copied!');
-                      }}
-                      className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-base">share</span>
-                      <span>Share</span>
-                    </button>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded-full bg-[#2a2a2a] text-[10px] font-semibold text-[#70dc8e] border border-[#353534]">
-                    Active Debate
-                  </span>
+              ) : discussions.length === 0 ? (
+                /* Pulse Feed Empty State */
+                <div className="p-8 rounded-2xl bg-[#201f1f] border border-[#353534] text-center">
+                  <span className="material-symbols-outlined text-3xl text-[#e9bcb6]/60 mb-2">forum</span>
+                  <p className="text-sm font-semibold text-[#e5e2e1] mb-1">
+                    No active community discussions found.
+                  </p>
+                  <p className="text-xs text-[#e9bcb6]/80 mb-4">
+                    Join a show hub to start a live discussion with fellow fans!
+                  </p>
+                  <Link
+                    to="/communities"
+                    className="inline-block px-5 py-2.5 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white text-xs font-bold transition-all shadow-md"
+                  >
+                    Browse Community Hubs
+                  </Link>
                 </div>
-              </article>
+              ) : (
+                /* Dynamic Persisted Community Discussions (Top 4 Most Liked) */
+                discussions.slice(0, 4).map((discussion) => {
+                  const isMenuOpen = activeOverflowMenuId === discussion.id;
+                  const isAuthor = user?.id === discussion.author.id;
+                  const formattedTime = new Date(discussion.createdAt).toLocaleDateString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
 
-              {/* Pulse Thread Card 2 */}
-              <article className="p-4 sm:p-5 rounded-2xl bg-[#201f1f] hover:bg-[#252424] transition-all border border-[#353534] shadow-sm">
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <img
-                        className="w-10 h-10 rounded-full object-cover ring-1 ring-[#353534]"
-                        alt="@PiltoverEnforcer"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuD-OEhqrztoiuY3OF8Xz2OvuFiCAqSNQaMm5_ePv2942nZblHmEi7oCN-rfgjJrMmVQ2X8AjDzG8nqHt10ogaiUO7RKbzdloEhrP2geWoYQgcA2n-HOUCIfRPgWyu42hfeCr5TLcAQ4bGYD-gs1u9M7cY5LnzkA_DYbZ8NKIdbdWjp7HgsKMbi5SBk5Hb2fGRXrPkai-KXdC7_h47eaVWrq6Z6ChDk8SFg7T2mWKFmqZdwDNF3sMssLew"
-                      />
-                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#70dc8e] ring-2 ring-[#201f1f]" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-bold text-sm text-[#e5e2e1]">@PiltoverEnforcer</span>
-                        <span className="px-1.5 py-0.5 rounded bg-[#2a2a2a] text-[#e9bcb6] text-[10px] font-bold">
-                          Lore Scholar
-                        </span>
-                        <span className="text-xs text-[#e9bcb6]">in</span>
-                        <span className="text-xs font-semibold text-[#e5e2e1]">Arcane</span>
-                      </div>
-                      <span className="text-[11px] text-[#e9bcb6]/70">14 minutes ago • Zaun Politics</span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setNotificationToast?.('Thread actions: report, mute, save.')}
-                    className="text-[#e9bcb6] hover:text-white p-1 cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-lg">more_horiz</span>
-                  </button>
-                </div>
-                <p className="text-xs sm:text-sm text-[#e5e2e1] mb-3 leading-relaxed">
-                  "Why Silco's legacy still dictates season 2's pacing: Jinx isn't fighting the Council; she is running from the void left when he died. Every scene in the first three episodes proves this thesis."
-                </p>
-                <div className="flex items-center justify-between pt-1 border-t border-[#353534]/50">
-                  <div className="flex items-center gap-4 text-xs text-[#e9bcb6]">
-                    <button
-                      type="button"
-                      onClick={() => toggleThreadLike('thread2')}
-                      className={`flex items-center gap-1 transition-colors cursor-pointer ${
-                        likedThreads['thread2'] ? 'text-[#e50914]' : 'hover:text-[#e50914]'
-                      }`}
+                  return (
+                    <article
+                      key={discussion.id}
+                      className="p-4 sm:p-5 rounded-2xl bg-[#201f1f] hover:bg-[#252424] transition-all border border-[#353534] shadow-sm relative group"
                     >
-                      <span
-                        className="material-symbols-outlined text-base"
-                        style={{
-                          fontVariationSettings: likedThreads['thread2'] ? "'FILL' 1" : "'FILL' 0",
-                        }}
-                      >
-                        favorite
-                      </span>
-                      <span>{threadLikes.thread2}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNotificationToast?.('89 replies loaded.')}
-                      className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-base">chat_bubble</span>
-                      <span>89 replies</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(window.location.href);
-                        setNotificationToast?.('Discussion link copied!');
-                      }}
-                      className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-base">share</span>
-                      <span>Share</span>
-                    </button>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded-full bg-[#2a2a2a] text-[10px] font-semibold text-[#e9bcb6] border border-[#353534]">
-                    Character Study
-                  </span>
-                </div>
-              </article>
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="relative shrink-0">
+                            <img
+                              className="w-10 h-10 rounded-full object-cover ring-1 ring-[#353534]"
+                              alt={discussion.author.name}
+                              src={discussion.author.avatar || DEFAULT_POSTER}
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).src =
+                                  'https://lh3.googleusercontent.com/aida-public/AB6AXuBmNfypXexpUqGV6ruN3XC8n2OqYyfzM-rHCYQH9eIHwRrMERZmMPSMVhkWDh7lAeFDaMoIKQEcn8pdfMMGDKqiI4PsbTQxIEly40c9OC_7jeis6uUX0Xmau1lUS3kAo7bw8bA67k1U1vhNTC8RwMbUTFVgQAOvm-N4cKCenSDe7FIT_9PVezInr_GDwS61-H7-0B_F9PO1zaeOr3XWdla-rkuVL8j2MXny0EU59iaaB5L157FxLwbvqw';
+                              }}
+                            />
+                            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#70dc8e] ring-2 ring-[#201f1f]" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-sm text-[#e5e2e1] truncate">
+                                {discussion.author.name}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-[#e50914]/20 text-[#ffb4aa] text-[10px] font-bold shrink-0">
+                                {discussion.author.badge}
+                              </span>
+                              <span className="text-xs text-[#e9bcb6] shrink-0">in</span>
+                              <span className="text-xs font-semibold text-[#e5e2e1] truncate">
+                                {discussion.show.title}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-[#e9bcb6]/70 block truncate">
+                              {formattedTime} • #{discussion.channel.name}
+                            </span>
+                          </div>
+                        </div>
 
-              {/* Pulse Thread Card 3 */}
-              <article className="p-4 sm:p-5 rounded-2xl bg-[#201f1f] hover:bg-[#252424] transition-all border border-[#353534] shadow-sm">
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <img
-                        className="w-10 h-10 rounded-full object-cover ring-1 ring-[#353534]"
-                        alt="@AmyLau99"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuA9YujzyFxBd8bwKWKIljFYwAyykS4XfL3B6GQOBWV9M7PInZW_8JKBd9PySannT0X7SyR9QegzE3gvZ78W4P5QSYCUeQ9SNn886VffJHp2TIIA1omGPO6mgh8H6qpvXFQ2fpsxn_7TE70YAXG43DyM1UhvHgsy_asPi5UmIJebxxl-SFWpviEKOBCjp2Tne4YhUtmBO69ktSKRgqadXQwpeY2mL49KfTLoc-XtAtHf0HBGLHgTTwLTkA"
-                      />
-                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#70dc8e] ring-2 ring-[#201f1f]" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-bold text-sm text-[#e5e2e1]">@AmyLau99</span>
-                        <span className="px-1.5 py-0.5 rounded bg-[#2a2a2a] text-[#e9bcb6] text-[10px] font-bold">
-                          Staff Writer
-                        </span>
-                        <span className="text-xs text-[#e9bcb6]">in</span>
-                        <span className="text-xs font-semibold text-[#e5e2e1]">Beef</span>
+                        {/* Overflow Actions Menu */}
+                        <div className="relative discussion-overflow-container shrink-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveOverflowMenuId(isMenuOpen ? null : discussion.id)
+                            }
+                            aria-label="Discussion options"
+                            className="text-[#e9bcb6] hover:text-white p-1 rounded-lg hover:bg-[#2a2a2a] transition-colors cursor-pointer"
+                          >
+                            <span className="material-symbols-outlined text-lg">more_horiz</span>
+                          </button>
+
+                          {isMenuOpen && (
+                            <div className="absolute right-0 top-full mt-1 w-48 bg-[#1c1b1b] border border-[#353534] rounded-xl shadow-2xl py-1 z-30 animate-in fade-in zoom-in-95 duration-100">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveOverflowMenuId(null);
+                                  handleShareDiscussion(discussion);
+                                }}
+                                className="w-full px-3.5 py-2 text-left text-xs text-[#e5e2e1] hover:bg-[#282727] flex items-center gap-2 cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-sm">share</span>
+                                <span>Copy Link</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveOverflowMenuId(null);
+                                  onJoinHub(discussion.show as unknown as MediaItem);
+                                }}
+                                className="w-full px-3.5 py-2 text-left text-xs text-[#e5e2e1] hover:bg-[#282727] flex items-center gap-2 cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-sm">forum</span>
+                                <span>Open Fandom Hub</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveOverflowMenuId(null);
+                                  setNotificationToast?.(
+                                    'Discussion reported for community guidelines review.'
+                                  );
+                                }}
+                                className="w-full px-3.5 py-2 text-left text-xs text-[#e9bcb6] hover:bg-[#282727] flex items-center gap-2 cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-sm">flag</span>
+                                <span>Report Thread</span>
+                              </button>
+                              {isAuthor && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDiscussion(discussion.id)}
+                                  className="w-full px-3.5 py-2 text-left text-xs text-[#ffb4aa] hover:bg-[#e50914]/20 flex items-center gap-2 border-t border-[#353534]/50 cursor-pointer"
+                                >
+                                  <span className="material-symbols-outlined text-sm">delete</span>
+                                  <span>Delete Post</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-[11px] text-[#e9bcb6]/70">21 minutes ago • Series Finale</span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setNotificationToast?.('Thread actions: report, mute, save.')}
-                    className="text-[#e9bcb6] hover:text-white p-1 cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-lg">more_horiz</span>
-                  </button>
-                </div>
-                <p className="text-xs sm:text-sm text-[#e5e2e1] mb-3 leading-relaxed">
-                  "The final hospital sequence is the most cathartic television ending of the decade. No dialogue needed, just pure emotional exhaustion transforming into acceptance."
-                </p>
-                <div className="flex items-center justify-between pt-1 border-t border-[#353534]/50">
-                  <div className="flex items-center gap-4 text-xs text-[#e9bcb6]">
-                    <button
-                      type="button"
-                      onClick={() => toggleThreadLike('thread3')}
-                      className={`flex items-center gap-1 transition-colors cursor-pointer ${
-                        likedThreads['thread3'] ? 'text-[#e50914]' : 'hover:text-[#e50914]'
-                      }`}
-                    >
-                      <span
-                        className="material-symbols-outlined text-base"
-                        style={{
-                          fontVariationSettings: likedThreads['thread3'] ? "'FILL' 1" : "'FILL' 0",
-                        }}
-                      >
-                        favorite
-                      </span>
-                      <span>{threadLikes.thread3}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNotificationToast?.('56 replies loaded.')}
-                      className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-base">chat_bubble</span>
-                      <span>56 replies</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(window.location.href);
-                        setNotificationToast?.('Discussion link copied!');
-                      }}
-                      className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-base">share</span>
-                      <span>Share</span>
-                    </button>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded-full bg-[#2a2a2a] text-[10px] font-semibold text-[#e9bcb6] border border-[#353534]">
-                    Finale Breakdown
-                  </span>
-                </div>
-              </article>
+
+                      <p className="text-xs sm:text-sm text-[#e5e2e1] mb-3 leading-relaxed whitespace-pre-wrap">
+                        {discussion.content}
+                      </p>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-[#353534]/50 flex-wrap gap-2">
+                        <div className="flex items-center gap-4 text-xs text-[#e9bcb6]">
+                          {/* Heart / Like Action */}
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePulseLike(discussion)}
+                            className={`flex items-center gap-1 transition-colors cursor-pointer ${
+                              discussion.isLiked ? 'text-[#e50914]' : 'hover:text-[#e50914]'
+                            }`}
+                            aria-label={discussion.isLiked ? 'Unlike discussion' : 'Like discussion'}
+                          >
+                            <span
+                              className="material-symbols-outlined text-base"
+                              style={{
+                                fontVariationSettings: discussion.isLiked ? "'FILL' 1" : "'FILL' 0",
+                              }}
+                            >
+                              favorite
+                            </span>
+                            <span>{discussion.likeCount}</span>
+                          </button>
+
+                          {/* Replies Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReplies(discussion)}
+                            className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
+                            aria-label={`View ${discussion.replyCount} replies`}
+                          >
+                            <span className="material-symbols-outlined text-base">chat_bubble</span>
+                            <span>{discussion.replyCount} {discussion.replyCount === 1 ? 'reply' : 'replies'}</span>
+                          </button>
+
+                          {/* Share Action */}
+                          <button
+                            type="button"
+                            onClick={() => handleShareDiscussion(discussion)}
+                            className="flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
+                            aria-label="Share discussion link"
+                          >
+                            <span className="material-symbols-outlined text-base">share</span>
+                            <span>Share</span>
+                          </button>
+                        </div>
+
+                        <span className="px-2.5 py-0.5 rounded-full bg-[#2a2a2a] text-[10px] font-semibold text-[#70dc8e] border border-[#353534]">
+                          {discussion.categoryTag}
+                        </span>
+                      </div>
+                    </article>
+                  );
+                })
+              )}
             </div>
 
             {/* Secondary Right Sidebar: Synchronized Watch Parties & Fandom Leaderboard */}
@@ -1006,78 +1283,117 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setNotificationToast?.(
-                      featuredShow
-                        ? `Synchronized watchroom initialized for "${featuredShow.title}".`
-                        : 'Synchronized watchroom session initialized.'
-                    );
+                    if (featuredShow) {
+                      onJoinHub(featuredShow);
+                    } else {
+                      setNotificationToast?.('Select a trending title to join its watchroom.');
+                    }
                   }}
-                  className="w-full py-2.5 rounded-xl bg-[#e50914] text-white font-bold text-xs flex items-center justify-center gap-2 hover:bg-[#b2000d] transition-all shadow-md active:scale-95 cursor-pointer"
+                  disabled={isLoading || !featuredShow}
+                  className="w-full py-2.5 rounded-xl bg-[#e50914] text-white font-bold text-xs flex items-center justify-center gap-2 hover:bg-[#b2000d] transition-all shadow-md active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="material-symbols-outlined text-base" style={{ fontVariationSettings: "'FILL' 1" }}>
                     play_circle
                   </span>
-                  <span>Join Watch Party</span>
+                  <span>{isLoading ? 'Loading Watchroom...' : 'Join Watch Party'}</span>
                 </button>
               </div>
 
               {/* Weekly Top Theorists Module */}
               <div className="p-5 rounded-2xl bg-[#201f1f] border border-[#353534] shadow-md">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-bold text-[#e5e2e1]">Weekly Top Theorists</h3>
-                  <span className="text-[10px] text-[#e9bcb6]/70 uppercase font-semibold">
-                    Ranked by Upvotes
-                  </span>
+                <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#e5e2e1]">Top Theorists</h3>
+                    <span className="text-[10px] text-[#e9bcb6]/70 uppercase font-semibold">
+                      Ranked by Upvotes & Activity
+                    </span>
+                  </div>
+
+                  {/* Period filter buttons */}
+                  <div className="flex items-center gap-1 bg-[#131313] p-0.5 rounded-lg border border-[#353534]/50">
+                    <button
+                      type="button"
+                      onClick={() => setLeaderboardPeriod('week')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                        leaderboardPeriod === 'week'
+                          ? 'bg-[#353534] text-white shadow-sm'
+                          : 'text-[#e9bcb6]/70 hover:text-[#e5e2e1]'
+                      }`}
+                    >
+                      Week
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLeaderboardPeriod('all')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                        leaderboardPeriod === 'all'
+                          ? 'bg-[#353534] text-white shadow-sm'
+                          : 'text-[#e9bcb6]/70 hover:text-[#e5e2e1]'
+                      }`}
+                    >
+                      All Time
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between p-2 rounded-xl hover:bg-[#2a2a2a] transition-colors cursor-pointer">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xs text-[#e50914] font-bold w-4 text-center">1</span>
-                      <img
-                        className="w-8 h-8 rounded-full object-cover"
-                        alt="@HawkinsLabAnalyst"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuC3upIvtvlmHlQa683B9aMVf93Ml1X6cs0NyiUI-RA3yvU0sf23xWAB53k_DjoFPDhPWqGdBzTu54XNKBJnyyTy8gkOxHI_etWfUiCgCNxOR-f6Z6AzTFYkFK9oKyth8JACRxWTsznGLpOPjLbGtW79W0KtdYNBX_l4GW3omVo9vR3aTQFqjEuZnYy87YPlUBkNHi0qYkAxASXwpaBkpI2nuDLiCgMCMPiIGOhfpivh9Jom9FL5MDzdXA"
-                      />
-                      <div>
-                        <div className="text-xs font-bold text-[#e5e2e1]">@HawkinsLabAnalyst</div>
-                        <div className="text-[10px] text-[#e9bcb6]/70">14 Verified Theories</div>
+                  {isLoadingLeaderboard ? (
+                    /* Skeletons */
+                    [1, 2, 3].map((i) => (
+                      <div key={i} className="flex items-center justify-between p-2 rounded-xl animate-pulse">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-4 h-4 bg-[#2a2a2a] rounded" />
+                          <div className="w-8 h-8 rounded-full bg-[#2a2a2a]" />
+                          <div className="space-y-1">
+                            <div className="w-24 h-3 bg-[#2a2a2a] rounded" />
+                            <div className="w-16 h-2 bg-[#2a2a2a] rounded" />
+                          </div>
+                        </div>
+                        <div className="w-14 h-3 bg-[#2a2a2a] rounded" />
                       </div>
+                    ))
+                  ) : theorists.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-[#e9bcb6]/70">
+                      No theorist activity recorded yet for {leaderboardPeriod === 'week' ? 'this week' : 'all time'}.
                     </div>
-                    <span className="text-xs text-[#70dc8e] font-bold">+4,920 pts</span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-xl hover:bg-[#2a2a2a] transition-colors cursor-pointer">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xs text-[#e9bcb6] font-bold w-4 text-center">2</span>
-                      <img
-                        className="w-8 h-8 rounded-full object-cover"
-                        alt="@TargaryenHistorian"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuBGc6p8FJlUpeMFtMqcPcFuPkAIrzoMJb4YfGDcUCarvPjgO1qVzYIqGhV6-qoDuQWuNTlztkXXxsOXPaYqeiYlr05ghE49eQ1olFHj0K0V6PPBkCepwgm98StTnyPVZYB0WMoi7fUyRV0rou3fIwIPNWEXaL16O-wN-lZ0uLa1r1VnY6CZAgjSDYigqDbc-8fPSK32R-TyTneNRcr5WuNHyf5dQmK9PVHKG0gqtrIlD0KbNsYe0oQ7hw"
-                      />
-                      <div>
-                        <div className="text-xs font-bold text-[#e5e2e1]">@TargaryenHistorian</div>
-                        <div className="text-[10px] text-[#e9bcb6]/70">9 Lineage Maps</div>
+                  ) : (
+                    theorists.map((theorist) => (
+                      <div
+                        key={theorist.userId}
+                        className="flex items-center justify-between p-2 rounded-xl hover:bg-[#2a2a2a] transition-colors group"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`text-xs font-bold w-4 text-center shrink-0 ${
+                              theorist.rank === 1 ? 'text-[#e50914]' : 'text-[#e9bcb6]'
+                            }`}
+                          >
+                            {theorist.rank}
+                          </span>
+                          <img
+                            className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-[#353534]"
+                            alt={theorist.displayName}
+                            src={theorist.avatarUrl || DEFAULT_POSTER}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src =
+                                'https://lh3.googleusercontent.com/aida-public/AB6AXuC3upIvtvlmHlQa683B9aMVf93Ml1X6cs0NyiUI-RA3yvU0sf23xWAB53k_DjoFPDhPWqGdBzTu54XNKBJnyyTy8gkOxHI_etWfUiCgCNxOR-f6Z6AzTFYkFK9oKyth8JACRxWTsznGLpOPjLbGtW79W0KtdYNBX_l4GW3omVo9vR3aTQFqjEuZnYy87YPlUBkNHi0qYkAxASXwpaBkpI2nuDLiCgMCMPiIGOhfpivh9Jom9FL5MDzdXA';
+                            }}
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-[#e5e2e1] truncate">
+                              @{theorist.username || theorist.displayName.replace(/\s+/g, '')}
+                            </div>
+                            <div className="text-[10px] text-[#e9bcb6]/70 truncate">
+                              {theorist.activitySummary || theorist.badge || 'Active Theorist'}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-xs text-[#70dc8e] font-bold shrink-0 ml-2">
+                          +{theorist.formattedPoints || theorist.points.toLocaleString()} pts
+                        </span>
                       </div>
-                    </div>
-                    <span className="text-xs text-[#70dc8e] font-bold">+3,410 pts</span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-xl hover:bg-[#2a2a2a] transition-colors cursor-pointer">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xs text-[#e9bcb6] font-bold w-4 text-center">3</span>
-                      <img
-                        className="w-8 h-8 rounded-full object-cover"
-                        alt="@QuantumJonas"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCKgq18in3cydeKhyKHfMdvmnOnSAj59K0EnvpZaVwM9Dt4nWOS5t3yDiecrX-wNcCXWWLBtQXZxwytTsfZRzK7OOqFmdyMqwVOPpq6ypat3jfrt5cyhIT_cIsH7UsMOoG-6uBA9RNd7mVrg7yP9O8MVu6blCCOiMauKg8KmGbiOo5L0hxrV4IQ6FSZ3JcFgzBJEe7Q8FYJry8QpC_RN34d2pamLkv5zn8D-Lh-_Wv9LsX7rmtHzjdYNw"
-                      />
-                      <div>
-                        <div className="text-xs font-bold text-[#e5e2e1]">@QuantumJonas</div>
-                        <div className="text-[10px] text-[#e9bcb6]/70">6 Paradox Solves</div>
-                      </div>
-                    </div>
-                    <span className="text-xs text-[#70dc8e] font-bold">+2,890 pts</span>
-                  </div>
+                    ))
+                  )}
                 </div>
               </div>
             </aside>
@@ -1100,13 +1416,13 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
-              <a
-                href="/reviews"
+              <Link
+                to="/reviews"
                 className="text-xs sm:text-sm font-semibold text-[#ffb4aa] hover:text-[#e5e2e1] flex items-center gap-0.5 transition-colors"
               >
                 <span>Explore All Reviews</span>
                 <span className="material-symbols-outlined text-base">chevron_right</span>
-              </a>
+              </Link>
 
               {/* Filter Tabs */}
               <div className="flex items-center p-1 rounded-xl bg-[#201f1f] border border-[#353534]/50 shadow-inner">
@@ -1148,176 +1464,232 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
 
           {/* 3-Column Reviews Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {/* Review Card 1 */}
-            <article className="flex flex-col justify-between p-5 rounded-2xl bg-[#201f1f] hover:bg-[#252424] transition-all border border-[#353534] shadow-md">
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-0.5 text-[#e50914]">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <span
-                        key={i}
-                        className="material-symbols-outlined text-base"
-                        style={{ fontVariationSettings: "'FILL' 1" }}
-                      >
-                        star
-                      </span>
-                    ))}
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-[#0e0e0e] text-[10px] font-semibold text-[#e9bcb6] border border-[#353534]/50">
-                    Stranger Things S4
-                  </span>
-                </div>
-                <h3 className="text-sm sm:text-base font-bold text-[#e5e2e1] mb-2 leading-snug">
-                  "Kate Bush, heavy metal bravery, and horror perfected on a cinematic scale."
-                </h3>
-                <p className="text-xs text-[#e9bcb6]/85 line-clamp-4 mb-4 leading-relaxed">
-                  The Duffer brothers managed to elevate childhood nostalgia into genuine cosmic dread. Max's sequence in 'Dear Billy' is not just television history; it is a masterclass in psychological editing and catharsis. The villain design of Vecna delivers on every promise.
-                </p>
-              </div>
-
-              <div className="pt-3 flex items-center justify-between border-t border-[#353534]/50">
-                <div className="flex items-center gap-2.5">
-                  <img
-                    className="w-8 h-8 rounded-full object-cover"
-                    alt="Marcus Thorne"
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuCPydkwqWNN6tj9GbMhzG6uSNXj31_cdN0JwnwekGiWcHRAEgq4t6TIFl-5gn9E22QdEfwNU4In0__bICGcEaYJOHdqq9yZDm4ICgoIs3ZvdyXHYivvd06N-ZeA_YCEU3W4BnYb2-gFH_Cb1szUT4En-x9B2Eyn7gAzADXcZr1o9msSwtkjkauCiD06thQHjRZquLDDtx8c45nsn2nACKyTBQXxt-qsPe69SInQEOAWUNg6eaLuEqfffw"
-                  />
+          {isLoadingReviews ? (
+            /* Loading Skeletons */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={`review-skel-${i}`}
+                  className="flex flex-col justify-between p-5 rounded-2xl bg-[#201f1f] border border-[#353534] animate-pulse h-64"
+                >
                   <div>
-                    <div className="text-xs font-bold text-[#e5e2e1] flex items-center gap-1">
-                      <span>Marcus Thorne</span>
-                      <span className="material-symbols-outlined text-xs text-[#e50914]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                        verified
-                      </span>
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="w-24 h-4 bg-[#2a2a2a] rounded" />
+                      <div className="w-28 h-4 bg-[#2a2a2a] rounded" />
                     </div>
-                    <span className="text-[10px] text-[#ffb4aa]">Verified Critic</span>
+                    <div className="w-3/4 h-5 bg-[#2a2a2a] rounded mb-3" />
+                    <div className="space-y-2">
+                      <div className="w-full h-3 bg-[#2a2a2a] rounded" />
+                      <div className="w-5/6 h-3 bg-[#2a2a2a] rounded" />
+                      <div className="w-4/6 h-3 bg-[#2a2a2a] rounded" />
+                    </div>
+                  </div>
+                  <div className="pt-3 border-t border-[#353534]/50 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-[#2a2a2a]" />
+                      <div className="space-y-1">
+                        <div className="w-20 h-3 bg-[#2a2a2a] rounded" />
+                        <div className="w-14 h-2 bg-[#2a2a2a] rounded" />
+                      </div>
+                    </div>
+                    <div className="w-16 h-3 bg-[#2a2a2a] rounded" />
                   </div>
                 </div>
+              ))}
+            </div>
+          ) : reviewsError && featuredReviews.length === 0 ? (
+            /* Error State */
+            <div className="p-8 rounded-2xl bg-[#201f1f] border border-[#353534] text-center">
+              <p className="text-sm text-[#e9bcb6] mb-3">{reviewsError}</p>
+              <button
+                type="button"
+                onClick={() => fetchReviews(activeReviewTab)}
+                className="px-4 py-2 rounded-xl bg-[#e50914] text-white font-bold text-xs hover:bg-[#b2000d] transition-all cursor-pointer"
+              >
+                Retry Loading Reviews
+              </button>
+            </div>
+          ) : featuredReviews.length === 0 ? (
+            /* Empty State */
+            <div className="p-8 rounded-2xl bg-[#201f1f] border border-[#353534] text-center">
+              <span className="material-symbols-outlined text-3xl text-[#e9bcb6]/60 mb-2">rate_review</span>
+              <p className="text-sm font-semibold text-[#e5e2e1] mb-1">
+                No fan reviews found for {activeReviewTab === 'week' ? 'this week' : activeReviewTab === 'helpful' ? 'most helpful' : 'all time'}.
+              </p>
+              <p className="text-xs text-[#e9bcb6]/80 mb-4">
+                Be the first to share an in-depth critique!
+              </p>
+              <Link
+                to="/reviews"
+                className="inline-block px-5 py-2.5 rounded-xl bg-[#e50914] hover:bg-[#b2000d] text-white text-xs font-bold transition-all shadow-md"
+              >
+                Write a Review
+              </Link>
+            </div>
+          ) : (
+            /* Dynamic Persisted Reviews Grid */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {featuredReviews.map((review) => {
+                const fullStars = Math.floor(review.rating);
+                const hasHalf = review.rating % 1 >= 0.5;
+                const isLiked = Boolean(review.isHelpfulLiked || helpfulLikedIds[review.id]);
 
-                <div className="flex items-center gap-3 text-xs text-[#e9bcb6]/80">
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-sm">thumb_up</span> 1.2k
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-sm">chat</span> 48
-                  </span>
-                </div>
-              </div>
-            </article>
+                return (
+                  <article
+                    key={review.id}
+                    className="flex flex-col justify-between p-5 rounded-2xl bg-[#201f1f] hover:bg-[#252424] transition-all border border-[#353534] shadow-md group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                        {/* Dynamic Star Ratings (0.5 to 5.0) */}
+                        <div
+                          className="flex items-center gap-0.5 text-[#e50914]"
+                          aria-label={`Rating: ${review.rating} out of 5 stars`}
+                        >
+                          {[1, 2, 3, 4, 5].map((starIdx) => {
+                            if (starIdx <= fullStars) {
+                              return (
+                                <span
+                                  key={starIdx}
+                                  className="material-symbols-outlined text-base"
+                                  style={{ fontVariationSettings: "'FILL' 1" }}
+                                >
+                                  star
+                                </span>
+                              );
+                            } else if (starIdx === fullStars + 1 && hasHalf) {
+                              return (
+                                <span
+                                  key={starIdx}
+                                  className="material-symbols-outlined text-base"
+                                  style={{ fontVariationSettings: "'FILL' 1" }}
+                                >
+                                  star_half
+                                </span>
+                              );
+                            } else {
+                              return (
+                                <span
+                                  key={starIdx}
+                                  className="material-symbols-outlined text-base text-[#353534]"
+                                >
+                                  star
+                                </span>
+                              );
+                            }
+                          })}
+                        </div>
 
-            {/* Review Card 2 */}
-            <article className="flex flex-col justify-between p-5 rounded-2xl bg-[#201f1f] hover:bg-[#252424] transition-all border border-[#353534] shadow-md">
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-0.5 text-[#e50914]">
-                    {[1, 2, 3, 4].map((i) => (
-                      <span
-                        key={i}
-                        className="material-symbols-outlined text-base"
-                        style={{ fontVariationSettings: "'FILL' 1" }}
+                        {/* Associated Show / Movie Badge */}
+                        <span className="px-2 py-0.5 rounded bg-[#0e0e0e] text-[10px] font-semibold text-[#e9bcb6] border border-[#353534]/50 truncate max-w-[150px]">
+                          {review.showTitle}
+                        </span>
+                      </div>
+
+                      <h3
+                        onClick={() => {
+                          onViewReviews({
+                            id: review.tmdbId,
+                            tmdbId: review.tmdbId,
+                            title: review.showTitle,
+                            overview: review.headline || '',
+                            mediaType: review.mediaType,
+                            posterPath: review.showPoster || '',
+                            backdropPath: review.showBackdrop || '',
+                            voteAverage: review.rating * 2,
+                            voteCount: review.helpfulCount || 0,
+                            genres: [],
+                          });
+                        }}
+                        className="text-sm sm:text-base font-bold text-[#e5e2e1] mb-2 leading-snug line-clamp-2 hover:text-[#ffb4aa] cursor-pointer transition-colors"
+                        title={review.headline}
                       >
-                        star
-                      </span>
-                    ))}
-                    <span className="material-symbols-outlined text-base">star_half</span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-[#0e0e0e] text-[10px] font-semibold text-[#e9bcb6] border border-[#353534]/50">
-                    Severance S1
-                  </span>
-                </div>
-                <h3 className="text-sm sm:text-base font-bold text-[#e5e2e1] mb-2 leading-snug">
-                  "The sterile corporate cubicle transformed into an anxiety-fueled masterpiece."
-                </h3>
-                <p className="text-xs text-[#e9bcb6]/85 line-clamp-4 mb-4 leading-relaxed">
-                  Every millimeter of set design reinforces the dread of Lumon Industries. The finale's cross-cutting between the 'Overtime Contingency' and Helly R.'s gala reveal is the most heart-stopping 40 minutes of pacing in the last ten years.
-                </p>
-              </div>
+                        "{review.headline}"
+                      </h3>
 
-              <div className="pt-3 flex items-center justify-between border-t border-[#353534]/50">
-                <div className="flex items-center gap-2.5">
-                  <img
-                    className="w-8 h-8 rounded-full object-cover"
-                    alt="Elena Vance"
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuCQVXH9bYYzSxg3Z_qc4w8nwwvjLx-Tk2OWpH1rQ7IlhOsQjDtl1w37s7WbBiCEkuAMEazyC0h-QEkQrM7PJxZ1AtouFATa4dYX-LbV0GNqZrP519r35ptvw9FbJ4XCmkzeIoNcYVqqN7xhlg5HVPF5IcGb9RTIFmzFik59yprV8ivt_Rx2phN4D63lyVFR5nR0DdEav_b9e2AQhiXOi6yYeTkvr8JkA-FtwM077A6w3UFEAcf_niU1UQ"
-                  />
-                  <div>
-                    <div className="text-xs font-bold text-[#e5e2e1] flex items-center gap-1">
-                      <span>Elena Vance</span>
-                      <span className="material-symbols-outlined text-xs text-[#e50914]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                        verified
-                      </span>
+                      <p className="text-xs text-[#e9bcb6]/85 line-clamp-4 mb-4 leading-relaxed whitespace-pre-wrap">
+                        {review.content}
+                      </p>
                     </div>
-                    <span className="text-[10px] text-[#70dc8e]">Top Theorist</span>
-                  </div>
-                </div>
 
-                <div className="flex items-center gap-3 text-xs text-[#e9bcb6]/80">
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-sm">thumb_up</span> 940
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-sm">chat</span> 32
-                  </span>
-                </div>
-              </div>
-            </article>
+                    <div className="pt-3 flex items-center justify-between border-t border-[#353534]/50">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img
+                          className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-[#353534]"
+                          alt={review.userName}
+                          src={review.userAvatar || DEFAULT_POSTER}
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src =
+                              'https://lh3.googleusercontent.com/aida-public/AB6AXuCPydkwqWNN6tj9GbMhzG6uSNXj31_cdN0JwnwekGiWcHRAEgq4t6TIFl-5gn9E22QdEfwNU4In0__bICGcEaYJOHdqq9yZDm4ICgoIs3ZvdyXHYivvd06N-ZeA_YCEU3W4BnYb2-gFH_Cb1szUT4En-x9B2Eyn7gAzADXcZr1o9msSwtkjkauCiD06thQHjRZquLDDtx8c45nsn2nACKyTBQXxt-qsPe69SInQEOAWUNg6eaLuEqfffw';
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-[#e5e2e1] flex items-center gap-1 truncate">
+                            <span className="truncate">{review.userName}</span>
+                            <span
+                              className="material-symbols-outlined text-xs text-[#e50914] shrink-0"
+                              style={{ fontVariationSettings: "'FILL' 1" }}
+                            >
+                              verified
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-[#ffb4aa] block truncate">
+                            {review.userRole || 'Community Reviewer'}
+                          </span>
+                        </div>
+                      </div>
 
-            {/* Review Card 3 */}
-            <article className="flex flex-col justify-between p-5 rounded-2xl bg-[#201f1f] hover:bg-[#252424] transition-all border border-[#353534] shadow-md">
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-0.5 text-[#e50914]">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <span
-                        key={i}
-                        className="material-symbols-outlined text-base"
-                        style={{ fontVariationSettings: "'FILL' 1" }}
-                      >
-                        star
-                      </span>
-                    ))}
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-[#0e0e0e] text-[10px] font-semibold text-[#e9bcb6] border border-[#353534]/50">
-                    Dark (All Seasons)
-                  </span>
-                </div>
-                <h3 className="text-sm sm:text-base font-bold text-[#e5e2e1] mb-2 leading-snug">
-                  "The only time-travel series to solve its own bootstrap paradox without cheating."
-                </h3>
-                <p className="text-xs text-[#e9bcb6]/85 line-clamp-4 mb-4 leading-relaxed">
-                  Baran bo Odar and Jantje Friese achieved the impossible: 26 episodes across three cycles where no loose thread is forgotten. It demands pen, paper, and respect for the viewer's intelligence. Pure German existential tragedy at its peak.
-                </p>
-              </div>
+                      <div className="flex items-center gap-3 text-xs text-[#e9bcb6]/80 shrink-0 ml-2">
+                        {/* Helpful Vote Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleReviewHelpful(review.id)}
+                          className={`flex items-center gap-1 transition-colors cursor-pointer ${
+                            isLiked ? 'text-[#e50914]' : 'hover:text-[#e50914]'
+                          }`}
+                          aria-label={isLiked ? 'Remove helpful vote' : 'Mark as helpful'}
+                        >
+                          <span
+                            className="material-symbols-outlined text-sm"
+                            style={{
+                              fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0",
+                            }}
+                          >
+                            thumb_up
+                          </span>
+                          <span>{review.helpfulCount}</span>
+                        </button>
 
-              <div className="pt-3 flex items-center justify-between border-t border-[#353534]/50">
-                <div className="flex items-center gap-2.5">
-                  <img
-                    className="w-8 h-8 rounded-full object-cover"
-                    alt="Felix Braun"
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuD9YFtTH6sKEhdZolMtasTcmZcQIniwb23B6nHmvTtXIcMLzAzvudtRSGKKJMsiabMnXEFnKVkwHiiVvMnvhMjpWzHlvSoOdr80u0uaunqIsUk0E3ly4cpNWCY4R4GmgewtKEYl8QsVO7SJQs9GmSBH7-YUhS0xh_HfRTj7P5kRi8AJQBwEvHqBZKWP7cLBuwsgl1-51x8G8v8dAGC1iepT79qYkSaWF3x1jfpRw37KnnCPDVlrsxIdEA"
-                  />
-                  <div>
-                    <div className="text-xs font-bold text-[#e5e2e1] flex items-center gap-1">
-                      <span>Felix Braun</span>
-                      <span className="material-symbols-outlined text-xs text-[#e50914]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                        verified
-                      </span>
+                        {/* Responses Count */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onViewReviews({
+                              id: review.tmdbId,
+                              tmdbId: review.tmdbId,
+                              title: review.showTitle,
+                              overview: review.headline || '',
+                              mediaType: review.mediaType,
+                              posterPath: review.showPoster || '',
+                              backdropPath: review.showBackdrop || '',
+                              voteAverage: review.rating * 2,
+                              voteCount: review.helpfulCount || 0,
+                              genres: [],
+                            });
+                          }}
+                          className="flex items-center gap-1 hover:text-[#e5e2e1] transition-colors cursor-pointer"
+                          aria-label={`View discussion for ${review.showTitle}`}
+                        >
+                          <span className="material-symbols-outlined text-sm">chat</span>
+                          <span>{review.responsesCount}</span>
+                        </button>
+                      </div>
                     </div>
-                    <span className="text-[10px] text-[#ffb4aa]">Verified Critic</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 text-xs text-[#e9bcb6]/80">
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-sm">thumb_up</span> 2.1k
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-sm">chat</span> 114
-                  </span>
-                </div>
-              </div>
-            </article>
-          </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* ========================================================================= */}
@@ -1355,6 +1727,175 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
           </div>
         </section>
+
+        {/* ========================================================================= */}
+        {/* 7. LIVE FAN PULSE REPLIES DRAWER / MODAL                                  */}
+        {/* ========================================================================= */}
+        {activeReplyDiscussion && (
+          <div
+            className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reply-modal-title"
+            onClick={() => setActiveReplyDiscussion(null)}
+          >
+            <div
+              className="bg-[#1c1b1b] border border-[#353534] rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="p-4 sm:p-5 border-b border-[#353534] flex items-center justify-between gap-3 bg-[#201f1f]">
+                <div className="flex items-center gap-3 min-w-0">
+                  <img
+                    className="w-9 h-9 rounded-full object-cover shrink-0 ring-1 ring-[#353534]"
+                    alt={activeReplyDiscussion.author.name}
+                    src={activeReplyDiscussion.author.avatar || DEFAULT_POSTER}
+                  />
+                  <div className="min-w-0">
+                    <h3 id="reply-modal-title" className="text-sm font-bold text-[#e5e2e1] truncate">
+                      Discussion Thread
+                    </h3>
+                    <p className="text-xs text-[#e9bcb6]/70 truncate">
+                      Started by {activeReplyDiscussion.author.name} in {activeReplyDiscussion.show.title}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveReplyDiscussion(null)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[#e9bcb6] hover:text-white hover:bg-[#2a2a2a] transition-colors cursor-pointer"
+                  aria-label="Close replies drawer"
+                >
+                  <span className="material-symbols-outlined text-lg">close</span>
+                </button>
+              </div>
+
+              {/* Original Discussion Excerpt */}
+              <div className="p-4 bg-[#141414] border-b border-[#353534]/50">
+                <p className="text-xs sm:text-sm text-[#e5e2e1] leading-relaxed whitespace-pre-wrap">
+                  {activeReplyDiscussion.content}
+                </p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="px-2 py-0.5 rounded-full bg-[#2a2a2a] text-[10px] font-semibold text-[#70dc8e] border border-[#353534]">
+                    {activeReplyDiscussion.categoryTag}
+                  </span>
+                  <span className="text-[11px] text-[#e9bcb6]/60">
+                    #{activeReplyDiscussion.channel.name}
+                  </span>
+                </div>
+              </div>
+
+              {/* Replies List */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+                <div className="text-xs font-bold uppercase tracking-wider text-[#e9bcb6]/60 mb-2">
+                  Replies ({replies.length})
+                </div>
+
+                {isLoadingReplies ? (
+                  <div className="space-y-3">
+                    {[1, 2].map((i) => (
+                      <div key={i} className="p-3 rounded-xl bg-[#201f1f] animate-pulse space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-[#2a2a2a]" />
+                          <div className="w-24 h-3 bg-[#2a2a2a] rounded" />
+                        </div>
+                        <div className="w-full h-3 bg-[#2a2a2a] rounded" />
+                      </div>
+                    ))}
+                  </div>
+                ) : replyError && replies.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-[#ffb4aa] bg-[#e50914]/10 rounded-xl border border-[#e50914]/20">
+                    {replyError}
+                  </div>
+                ) : replies.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-[#e9bcb6]/70">
+                    No replies yet. Be the first to join the conversation!
+                  </div>
+                ) : (
+                  replies.map((reply) => {
+                    const replyTime = new Date(reply.createdAt).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    });
+
+                    return (
+                      <div
+                        key={reply.id}
+                        className="p-3.5 rounded-xl bg-[#201f1f] border border-[#353534]/60 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img
+                              className="w-6 h-6 rounded-full object-cover shrink-0 ring-1 ring-[#353534]"
+                              alt={reply.author.name}
+                              src={reply.author.avatar || DEFAULT_POSTER}
+                            />
+                            <span className="text-xs font-bold text-[#e5e2e1] truncate">
+                              {reply.author.name}
+                            </span>
+                            <span className="text-[10px] text-[#ffb4aa] bg-[#e50914]/20 px-1.5 py-0.5 rounded font-semibold shrink-0">
+                              {reply.author.role}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-[#e9bcb6]/60 shrink-0">
+                            {replyTime}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#e5e2e1] leading-relaxed whitespace-pre-wrap pl-8">
+                          {reply.content}
+                        </p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Reply Form */}
+              <div className="p-4 border-t border-[#353534] bg-[#201f1f]">
+                {replyError && (
+                  <p className="text-xs text-[#ffb4aa] mb-2">{replyError}</p>
+                )}
+
+                {user ? (
+                  <form onSubmit={handleSendReply} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={replyInputText}
+                      onChange={(e) => setReplyInputText(e.target.value)}
+                      placeholder="Write a constructive reply..."
+                      disabled={isSubmittingReply}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-[#131313] border border-[#353534] text-xs text-[#e5e2e1] placeholder-[#e9bcb6]/50 focus:outline-none focus:border-[#e50914] transition-colors"
+                      maxLength={500}
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSubmittingReply || !replyInputText.trim()}
+                      className="px-5 py-2.5 rounded-xl bg-[#e50914] text-white font-bold text-xs hover:bg-[#b2000d] transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shrink-0"
+                    >
+                      {isSubmittingReply ? 'Sending...' : 'Reply'}
+                    </button>
+                  </form>
+                ) : (
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-[#131313] border border-[#353534]/50">
+                    <span className="text-xs text-[#e9bcb6]">
+                      Sign in to reply to this discussion.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => openAuthModal()}
+                      className="px-3.5 py-1.5 rounded-lg bg-[#e50914] text-white text-xs font-bold hover:bg-[#b2000d] transition-all cursor-pointer"
+                    >
+                      Sign In
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );

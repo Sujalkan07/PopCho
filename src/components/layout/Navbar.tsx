@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { searchMedia } from '../../services/tmdb/search';
 import { getImageUrl, DEFAULT_POSTER } from '../../services/tmdb/client';
 import type { MediaItem } from '../../services/tmdb/types';
+import { UserAvatar } from '../common/UserAvatar';
 
 interface NavbarProps {
   activeTab?: 'home' | 'discover' | 'reviews' | 'communities' | 'watchlist' | 'hubs';
@@ -355,14 +356,11 @@ export const Navbar = ({
                 className="flex items-center gap-1.5 pl-2 border-l border-[#353534] focus:outline-none cursor-pointer"
               >
                 <div className="relative">
-                  <img
-                    src={
-                      profile?.avatarUrl ||
-                      user.user_metadata?.avatar_url ||
-                      'https://lh3.googleusercontent.com/aida-public/AB6AXuBmNfypXexpUqGV6ruN3XC8n2OqYyfzM-rHCYQH9eIHwRrMERZmMPSMVhkWDh7lAeFDaMoIKQEcn8pdfMMGDKqiI4PsbTQxIEly40c9OC_7jeis6uUX0Xmau1lUS3kAo7bw8bA67k1U1vhNTC8RwMbUTFVgQAOvm-N4cKCenSDe7FIT_9PVezInr_GDwS61-H7-0B_F9PO1zaeOr3XWdla-rkuVL8j2MXny0EU59iaaB5L157FxLwbvqw'
-                    }
-                    alt="Profile"
-                    className="w-8 h-8 rounded-full object-cover ring-1 ring-[#353534]"
+                  <UserAvatar
+                    src={profile?.avatarUrl || user.user_metadata?.avatar_url}
+                    name={profile?.displayName || user.email}
+                    size="sm"
+                    ringClassName="ring-1 ring-[#353534]"
                   />
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#70dc8e] ring-2 ring-[#0e0e0e]" />
                 </div>
@@ -389,6 +387,14 @@ export const Navbar = ({
                     )}
                   </div>
                   <div className="py-1">
+                    <Link
+                      to="/onboarding/avatar"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-xs text-[#e9bcb6] hover:text-[#e5e2e1] hover:bg-[#2a2a2a] transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-base text-[#e50914]">badge</span>
+                      Choose Fandom Identity
+                    </Link>
                     <Link
                       to="/watchlist"
                       onClick={() => setProfileOpen(false)}

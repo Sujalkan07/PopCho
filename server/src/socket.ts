@@ -13,6 +13,18 @@ interface SocketUser {
   role: string;
 }
 
+let ioInstance: SocketIOServer | null = null;
+
+export function getIO(): SocketIOServer | null {
+  return ioInstance;
+}
+
+export function broadcastPulseEvent(event: string, payload: unknown) {
+  if (ioInstance) {
+    ioInstance.emit(event, payload);
+  }
+}
+
 export function initSocketServer(httpServer: HttpServer, allowedOrigins: string[]) {
   const io = new SocketIOServer(httpServer, {
     cors: {
@@ -292,5 +304,6 @@ export function initSocketServer(httpServer: HttpServer, allowedOrigins: string[
     });
   });
 
+  ioInstance = io;
   return io;
 }

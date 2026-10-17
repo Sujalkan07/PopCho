@@ -63,14 +63,18 @@ model Message {
   userId    String
   content   String     @db.Text
   isSpoiler Boolean    @default(false)
+  parentId  String?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel   Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  parent    Message?   @relation("MessageReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Message[]  @relation("MessageReplies")
   reactions Reaction[]
 
   @@index([channelId, createdAt])
   @@index([userId])
+  @@index([parentId])
 }
 
 model Reaction {
