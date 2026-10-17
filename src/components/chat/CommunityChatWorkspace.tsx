@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { MediaItem, ChatMessage, CommunityChannel } from '../../services/tmdb/types';
+import { ShowDescriptionCard } from './ShowDescriptionCard';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   lookupCommunity,
@@ -72,22 +73,6 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
   const [memberCount, setMemberCount] = useState<number>(show.communityMembersCount || 0);
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [isSocketConnected, setIsSocketConnected] = useState<boolean>(checkSocketConnected());
-
-  // Watch party countdown state
-  const [countdown, setCountdown] = useState({ days: 2, hours: 14, mins: 38, secs: 52 });
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev.secs > 0) return { ...prev, secs: prev.secs - 1 };
-        if (prev.mins > 0) return { ...prev, mins: prev.mins - 1, secs: 59 };
-        if (prev.hours > 0) return { ...prev, hours: prev.hours - 1, mins: 59, secs: 59 };
-        if (prev.days > 0) return { ...prev, days: prev.days - 1, hours: 23, mins: 59, secs: 59 };
-        return prev;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   const chatStreamRef = useRef<HTMLDivElement>(null);
 
@@ -824,83 +809,12 @@ export const CommunityChatWorkspace: React.FC<CommunityChatWorkspaceProps> = ({
 
           {/* RIGHT CONTEXTUAL SIDEBAR */}
           <aside className="lg:col-span-4 xl:col-span-3 flex flex-col gap-5">
-            {/* Pinned Fan Theory Card */}
-            <div className="rounded-2xl bg-[#201f1f] border border-[#353534] p-4 sm:p-5 shadow-lg flex flex-col gap-2.5">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-[#e50914] text-xs font-bold uppercase tracking-wider">
-                  <span className="material-symbols-outlined text-sm">push_pin</span>
-                  Theory of the Week
-                </span>
-                <span className="px-2 py-0.5 rounded bg-[#2a2a2a] text-[#e9bcb6] text-[10px] font-semibold">
-                  4.2k Upvotes
-                </span>
-              </div>
-              <h3 className="text-sm sm:text-base font-bold text-[#e5e2e1] leading-snug">
-                "Will Byers Created the Architectural Terrain Layout of the Upside Down in 1983"
-              </h3>
-              <p className="text-xs text-[#e9bcb6]/80 line-clamp-3 leading-relaxed">
-                Analytical breakdown comparing Will's original Castle Byers crayon drawings with the exact terrain boundaries of the S4 rift lines...
-              </p>
-              <a
-                href="#theory-full"
-                onClick={(e) => {
-                  e.preventDefault();
-                  alert('Full 24-page analytical theory breakdown previewed!');
-                }}
-                className="text-xs text-[#e50914] font-bold hover:underline flex items-center gap-1 pt-1"
-              >
-                <span>Read Complete Breakdown</span>
-                <span className="material-symbols-outlined text-xs">arrow_forward</span>
-              </a>
-            </div>
-
-            {/* Upcoming Watch Party Card */}
-            <div className="rounded-2xl bg-[#201f1f] border border-[#353534] p-4 sm:p-5 shadow-lg flex flex-col gap-3">
-              <div className="flex items-center gap-1.5 text-[#e50914] text-xs font-bold uppercase tracking-wider">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#e50914] opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-[#e50914]" />
-                </span>
-                Upcoming Fan Watch Party
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-[#e5e2e1]">
-                  Hawkins S1–S4 Global Sync
-                </h4>
-                <p className="text-xs text-[#e9bcb6]/80 mt-0.5">
-                  Live synchronized playback with director commentary trivia.
-                </p>
-              </div>
-
-              {/* Countdown grid */}
-              <div className="grid grid-cols-4 gap-2 py-1 text-center">
-                <div className="p-2 rounded-xl bg-[#0e0e0e] border border-[#353534]">
-                  <span className="text-base font-extrabold text-[#e5e2e1]">{countdown.days}</span>
-                  <span className="block text-[9px] uppercase text-[#e9bcb6]/70">Days</span>
-                </div>
-                <div className="p-2 rounded-xl bg-[#0e0e0e] border border-[#353534]">
-                  <span className="text-base font-extrabold text-[#e5e2e1]">{countdown.hours}</span>
-                  <span className="block text-[9px] uppercase text-[#e9bcb6]/70">Hours</span>
-                </div>
-                <div className="p-2 rounded-xl bg-[#0e0e0e] border border-[#353534]">
-                  <span className="text-base font-extrabold text-[#e5e2e1]">{countdown.mins}</span>
-                  <span className="block text-[9px] uppercase text-[#e9bcb6]/70">Mins</span>
-                </div>
-                <div className="p-2 rounded-xl bg-[#0e0e0e] border border-[#353534]">
-                  <span className="text-base font-extrabold text-[#e50914]">{countdown.secs}</span>
-                  <span className="block text-[9px] uppercase text-[#e9bcb6]/70">Secs</span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => alert('RSVP confirmed! You will receive notification before watch party streams.')}
-                className="w-full py-2.5 rounded-xl bg-[#2a2a2a] hover:bg-[#353534] text-[#e5e2e1] text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors border border-[#353534]"
-              >
-                <span className="material-symbols-outlined text-base">event_available</span>
-                <span>RSVP (3,842 Attending)</span>
-              </button>
-            </div>
+            {/* Unified Show Description Card */}
+            <ShowDescriptionCard
+              key={`${show.mediaType || 'tv'}-${show.tmdbId || show.id}`}
+              show={show}
+              communityOverview={communityRecord?.description}
+            />
 
             {/* Online Members List */}
             <div className="rounded-2xl bg-[#201f1f] border border-[#353534] p-4 sm:p-5 shadow-lg flex flex-col gap-3">
